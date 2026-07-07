@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import Button from "@mui/material/Button";
+import Badge from "@mui/material/Badge";
+import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import Select from "@mui/material/Select";
@@ -12,6 +14,8 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableSortLabel from "@mui/material/TableSortLabel";
+import Tooltip from "@mui/material/Tooltip";
+import MarkUnreadChatAltIcon from "@mui/icons-material/MarkUnreadChatAlt";
 import VolumeUpIcon from "@mui/icons-material/VolumeUp";
 import { EmergencyCategory, Incident, IncidentStatus } from "@/types";
 import { StatusChip } from "@/components/StatusChip";
@@ -22,27 +26,92 @@ type IncidentTableProps = {
   showVoice?: boolean;
 };
 
-export function IncidentTable({ incidents, onView, showVoice = false }: IncidentTableProps) {
-  const [categoryFilter, setCategoryFilter] = useState<EmergencyCategory | "All">("All");
-  const [statusFilter, setStatusFilter] = useState<IncidentStatus | "All">("All");
-  const [sortKey, setSortKey] = useState<keyof Pick<Incident, "category" | "deviceId" | "location" | "timestamp" | "status">>(
-    "timestamp"
+const seenFieldNotesStorageKey = "nodeguard.seenFieldNotes";
+const seenFieldNotesChangedEvent = "nodeguard:seen-field-notes-changed";
+
+function getSeenFieldNotesSnapshot() {
+  try {
+    return window.localStorage.getItem(seenFieldNotesStorageKey) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
+
+function getSeenFieldNotesServerSnapshot() {
+  return "[]";
+}
+
+function subscribeToSeenFieldNotes(onStoreChange: () => void) {
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === seenFieldNotesStorageKey) onStoreChange();
+  };
+  window.addEventListener("storage", handleStorage);
+  window.addEventListener(seenFieldNotesChangedEvent, onStoreChange);
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(seenFieldNotesChangedEvent, onStoreChange);
+  };
+}
+
+export function IncidentTable({
+  incidents,
+  onView,
+  showVoice = false,
+}: IncidentTableProps) {
+  const [categoryFilter, setCategoryFilter] = useState<
+    EmergencyCategory | "All"
+  >("All");
+  const [statusFilter, setStatusFilter] = useState<IncidentStatus | "All">(
+    "All",
   );
+  const seenNoteKeysSnapshot = useSyncExternalStore(
+    subscribeToSeenFieldNotes,
+    getSeenFieldNotesSnapshot,
+    getSeenFieldNotesServerSnapshot,
+  );
+  const seenNoteKeys = useMemo(() => {
+    try {
+      return new Set(JSON.parse(seenNoteKeysSnapshot) as string[]);
+    } catch {
+      return new Set();
+    }
+  }, [seenNoteKeysSnapshot]);
+  const [sortKey, setSortKey] =
+    useState<
+      keyof Pick<
+        Incident,
+        "category" | "deviceId" | "location" | "timestamp" | "status"
+      >
+    >("timestamp");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   const categories = useMemo(
-    () => ["All", ...Array.from(new Set(incidents.map((incident) => incident.category)))] as Array<EmergencyCategory | "All">,
-    [incidents]
+    () =>
+      [
+        "All",
+        ...Array.from(new Set(incidents.map((incident) => incident.category))),
+      ] as Array<EmergencyCategory | "All">,
+    [incidents],
   );
   const statuses = useMemo(
-    () => ["All", ...Array.from(new Set(incidents.map((incident) => incident.status)))] as Array<IncidentStatus | "All">,
-    [incidents]
+    () =>
+      [
+        "All",
+        ...Array.from(new Set(incidents.map((incident) => incident.status))),
+      ] as Array<IncidentStatus | "All">,
+    [incidents],
   );
 
   const visibleIncidents = useMemo(() => {
     return incidents
-      .filter((incident) => categoryFilter === "All" || incident.category === categoryFilter)
-      .filter((incident) => statusFilter === "All" || incident.status === statusFilter)
+      .filter(
+        (incident) =>
+          categoryFilter === "All" || incident.category === categoryFilter,
+      )
+      .filter(
+        (incident) =>
+          statusFilter === "All" || incident.status === statusFilter,
+      )
       .toSorted((a, b) => {
         const aValue = a[sortKey];
         const bValue = b[sortKey];
@@ -60,8 +129,23 @@ export function IncidentTable({ incidents, onView, showVoice = false }: Incident
     setSortDirection("asc");
   };
 
+  const handleViewNotes = (incident: Incident) => {
+    const noteKey = `${incident.id}:${incident.fieldNoteCount ?? 0}:${incident.latestFieldNoteAt ?? ""}`;
+    const next = new Set(seenNoteKeys).add(noteKey);
+    window.localStorage.setItem(
+      seenFieldNotesStorageKey,
+      JSON.stringify(Array.from(next)),
+    );
+    window.dispatchEvent(new CustomEvent(seenFieldNotesChangedEvent));
+    onView?.(incident);
+  };
+
   return (
-    <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid rgba(36,77,58,0.08)" }}>
+    <TableContainer
+      component={Paper}
+      elevation={0}
+      sx={{ border: "1px solid rgba(36,77,58,0.08)" }}
+    >
       <Table>
         <TableHead>
           <TableRow>
@@ -71,7 +155,9 @@ export function IncidentTable({ incidents, onView, showVoice = false }: Incident
                 variant="standard"
                 value={categoryFilter}
                 onChange={(event) => {
-                  setCategoryFilter(event.target.value as EmergencyCategory | "All");
+                  setCategoryFilter(
+                    event.target.value as EmergencyCategory | "All",
+                  );
                   setSortKey("category");
                 }}
                 disableUnderline
@@ -146,12 +232,38 @@ export function IncidentTable({ incidents, onView, showVoice = false }: Incident
               </TableCell>
               {showVoice && (
                 <TableCell>
-                  <Button size="small" variant="outlined" startIcon={<VolumeUpIcon />}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<VolumeUpIcon />}
+                  >
                     Clip
                   </Button>
                 </TableCell>
               )}
               <TableCell align="right">
+                {Boolean(incident.fieldNoteCount) && (
+                  <Tooltip
+                    title={`${incident.fieldNoteCount} field note${incident.fieldNoteCount === 1 ? "" : "s"} received`}
+                  >
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={() => handleViewNotes(incident)}
+                      aria-label="View field notes"
+                    >
+                      <Badge
+                        badgeContent={incident.fieldNoteCount}
+                        color="error"
+                        invisible={seenNoteKeys.has(
+                          `${incident.id}:${incident.fieldNoteCount ?? 0}:${incident.latestFieldNoteAt ?? ""}`,
+                        )}
+                      >
+                        <MarkUnreadChatAltIcon fontSize="small" />
+                      </Badge>
+                    </IconButton>
+                  </Tooltip>
+                )}
                 <Button size="small" onClick={() => onView?.(incident)}>
                   View
                 </Button>

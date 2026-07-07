@@ -8,13 +8,17 @@ type StatusChipProps = {
 };
 
 const statusColors: Record<string, { bg: string; color: string }> = {
-  Pending: { bg: "#FFF4D6", color: "#7A5200" },
-  Verified: { bg: "#E8F2ED", color: mdrrmoPalette.darkGreen },
-  Dispatched: { bg: "#FFE7D6", color: "#9A4A12" },
+  "New Alert": { bg: "#FFEBEE", color: mdrrmoPalette.alertRed },
+  Assigned: { bg: "#E8F2ED", color: mdrrmoPalette.darkGreen },
+  "En Route": { bg: "#FFE7D6", color: "#9A4A12" },
+  "On Scene": { bg: "#FFF4D6", color: "#7A5200" },
   Responding: { bg: "#E3F2FD", color: "#0D47A1" },
   Resolved: { bg: "#E7F4E8", color: mdrrmoPalette.successGreen },
   Closed: { bg: "#ECEFF1", color: "#455A64" },
+  "Need Backup": { bg: "#FFEBEE", color: mdrrmoPalette.alertRed },
+  "False Alert": { bg: "#ECEFF1", color: "#455A64" },
   Available: { bg: "#E7F4E8", color: mdrrmoPalette.successGreen },
+  Dispatched: { bg: "#FFE7D6", color: "#9A4A12" },
   Busy: { bg: "#FFF4D6", color: "#7A5200" },
   Offline: { bg: "#ECEFF1", color: "#455A64" },
   "Under Maintenance": { bg: "#FFEBEE", color: mdrrmoPalette.alertRed },

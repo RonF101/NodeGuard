@@ -1,125 +1,79 @@
 import { Incident, Report } from "@/types";
 
-export const incidents: Incident[] = [
-  {
-    id: "NG-2026-071",
-    category: "Medical Emergency",
-    deviceId: "LT-NODE-005",
-    location: "Km. 5 Pico",
-    timestamp: "2026-07-06 08:42",
-    status: "Pending",
-    triggerMethod: "Voice",
-    voiceContext: "Voice clip attached",
-    callerContext: "Resident reports an elderly person with breathing difficulty near the roadside.",
-    assignedResponder: "Unassigned",
-    priority: "Critical"
-  },
-  {
-    id: "NG-2026-070",
-    category: "Security/Public Safety",
-    deviceId: "LT-NODE-002",
-    location: "Public Market",
-    timestamp: "2026-07-06 08:17",
-    status: "Verified",
-    triggerMethod: "Button",
-    voiceContext: "Voice clip attached",
-    callerContext: "Crowd disturbance reported at the produce loading area.",
-    assignedResponder: "LT PNP Patrol 2",
-    priority: "High"
-  },
-  {
-    id: "NG-2026-069",
-    category: "Fire/Disaster Emergency",
-    deviceId: "LT-NODE-006",
-    location: "Transport Terminal",
-    timestamp: "2026-07-06 07:54",
-    status: "Dispatched",
-    triggerMethod: "Voice",
-    voiceContext: "Voice clip attached",
-    callerContext: "Smoke observed from a parked utility vehicle near the terminal exit.",
-    assignedResponder: "BFP La Trinidad Unit 1",
-    priority: "Critical"
-  },
-  {
-    id: "NG-2026-068",
-    category: "Medical Emergency",
-    deviceId: "LT-NODE-004",
-    location: "School Area",
-    timestamp: "2026-07-06 07:28",
-    status: "Responding",
-    triggerMethod: "Button",
-    voiceContext: "Voice clip attached",
-    callerContext: "Student fainted during morning assembly.",
-    assignedResponder: "EMS Team Alpha",
-    priority: "High"
-  },
-  {
-    id: "NG-2026-067",
-    category: "Security/Public Safety",
-    deviceId: "LT-NODE-001",
-    location: "Pico",
-    timestamp: "2026-07-06 06:41",
-    status: "Resolved",
-    triggerMethod: "Button",
-    voiceContext: "Voice clip archived",
-    callerContext: "Road obstruction cleared by barangay responders.",
-    assignedResponder: "Barangay Pico Response Desk",
-    priority: "Moderate"
-  },
-  {
-    id: "NG-2026-066",
-    category: "Fire/Disaster Emergency",
-    deviceId: "LT-NODE-003",
-    location: "Km. 4",
-    timestamp: "2026-07-05 22:18",
-    status: "Closed",
-    triggerMethod: "Voice",
-    voiceContext: "Voice clip archived",
-    callerContext: "Minor landslide debris reported and cleared.",
-    assignedResponder: "MDRRMO Field Team Bravo",
-    priority: "High"
-  }
+const demoCaseIds = [101, 111, 121, 131, 141, 151, 161, 171, 181];
+const demoStatuses: Incident["status"][] = [
+  "New Alert",
+  "Assigned",
+  "En Route",
+  "On Scene",
+  "Responding",
+  "Resolved",
+  "Closed",
+  "Need Backup",
+  "False Alert",
 ];
 
-export const reports: Report[] = [
+const locations = [
   {
-    id: "RPT-2026-044",
-    incidentId: "NG-2026-067",
-    category: "Security/Public Safety",
-    location: "Pico",
-    status: "Resolved",
-    closedAt: "2026-07-06 07:05",
-    responseTime: "18 min",
-    leadAgency: "Barangay Responders"
+    category: "Medical Emergency" as const,
+    deviceId: "LT-NODE-005",
+    location: "Km. 5 Pico",
+    context:
+      "Resident reports a person needing urgent medical assistance near the roadside.",
   },
   {
-    id: "RPT-2026-043",
-    incidentId: "NG-2026-066",
-    category: "Fire/Disaster Emergency",
-    location: "Km. 4",
-    status: "Closed",
-    closedAt: "2026-07-05 23:02",
-    responseTime: "32 min",
-    leadAgency: "MDRRMO"
-  },
-  {
-    id: "RPT-2026-042",
-    incidentId: "NG-2026-061",
-    category: "Medical Emergency",
+    category: "Security/Public Safety" as const,
+    deviceId: "LT-NODE-002",
     location: "Public Market",
-    status: "Closed",
-    closedAt: "2026-07-05 16:12",
-    responseTime: "11 min",
-    leadAgency: "EMS"
+    context: "Public safety concern reported near the produce loading area.",
   },
   {
-    id: "RPT-2026-041",
-    incidentId: "NG-2026-058",
-    category: "Security/Public Safety",
+    category: "Fire/Disaster Emergency" as const,
+    deviceId: "LT-NODE-006",
     location: "Transport Terminal",
-    status: "Resolved",
-    closedAt: "2026-07-04 18:44",
-    responseTime: "24 min",
-    leadAgency: "PNP"
-  }
+    context: "Possible fire or disaster-related report near the terminal bay.",
+  },
 ];
+
+export const incidents: Incident[] = demoCaseIds.flatMap((baseId, groupIndex) =>
+  locations.map((location, locationIndex) => {
+    const idNumber = baseId + locationIndex;
+    const hour = String(8 - Math.floor(groupIndex / 3)).padStart(2, "0");
+    const minute = String(42 - locationIndex * 9).padStart(2, "0");
+    const status = demoStatuses[groupIndex];
+    const isAssigned = !["New Alert", "Closed", "False Alert"].includes(status);
+
+    return {
+      id: `NG-2026-${idNumber}`,
+      category: location.category,
+      deviceId: location.deviceId,
+      location: location.location,
+      timestamp: `2026-07-06 ${hour}:${minute}`,
+      status,
+      triggerMethod: locationIndex === 1 ? "Button" : "Voice",
+      voiceContext:
+        locationIndex === 2 ? "No voice context" : "Voice clip attached",
+      callerContext: `${location.context} Demo ${status.toLowerCase()} case ${groupIndex + 1}.`,
+      assignedResponder: isAssigned ? "Ronie Delos Santos" : "Unassigned",
+      priority:
+        groupIndex < 2 ? "Critical" : groupIndex < 6 ? "High" : "Moderate",
+      buzzerActive: false,
+    };
+  }),
+);
+
+export const reports: Report[] = incidents
+  .filter((incident) =>
+    ["Resolved", "Closed", "False Alert"].includes(incident.status),
+  )
+  .slice(0, 6)
+  .map((incident, index) => ({
+    id: `RPT-2026-${String(60 + index).padStart(3, "0")}`,
+    incidentId: incident.id,
+    category: incident.category,
+    location: incident.location,
+    status: incident.status === "False Alert" ? "Closed" : incident.status,
+    closedAt: `2026-07-06 ${String(10 + index).padStart(2, "0")}:12`,
+    responseTime: `${12 + index * 4} min`,
+    leadAgency: incident.assignedResponder,
+  }));

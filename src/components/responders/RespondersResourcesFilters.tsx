@@ -19,7 +19,15 @@ type RespondersResourcesFiltersProps = {
   onChange: (filters: ResponderFilters) => void;
 };
 
-const responderStatuses: Array<ResponderStatus | "All"> = ["All", "Available", "Dispatched", "Responding", "Busy", "Offline"];
+const responderStatuses: Array<ResponderStatus | "All"> = [
+  "All",
+  "Available",
+  "En Route",
+  "On Scene",
+  "Responding",
+  "Busy",
+  "Offline"
+];
 const resourceStatuses: Array<ResourceStatus | "All"> = [
   "All",
   "Available",

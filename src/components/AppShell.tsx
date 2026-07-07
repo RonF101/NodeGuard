@@ -5,6 +5,7 @@ import Box from "@mui/material/Box";
 import Drawer from "@mui/material/Drawer";
 import Toolbar from "@mui/material/Toolbar";
 import { Header } from "@/components/Header";
+import { RealtimeRefresh } from "@/components/RealtimeRefresh";
 import { Sidebar, drawerWidth } from "@/components/Sidebar";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -12,6 +13,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "background.default" }}>
+      <RealtimeRefresh />
       <Header onMenuClick={() => setMobileOpen(true)} />
       <Box component="nav" sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}>
         <Drawer

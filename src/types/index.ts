@@ -1,17 +1,25 @@
 export type EmergencyCategory =
-  | "Medical Emergency"
-  | "Security/Public Safety"
-  | "Fire/Disaster Emergency";
+  "Medical Emergency" | "Security/Public Safety" | "Fire/Disaster Emergency";
 
 export type IncidentStatus =
-  | "Pending"
-  | "Verified"
-  | "Dispatched"
+  | "New Alert"
+  | "Assigned"
+  | "En Route"
+  | "On Scene"
   | "Responding"
   | "Resolved"
-  | "Closed";
+  | "Closed"
+  | "Need Backup"
+  | "False Alert";
 
-export type ResponderStatus = "Available" | "Dispatched" | "Responding" | "Busy" | "Offline";
+export type ResponderStatus =
+  | "Available"
+  | "Dispatched"
+  | "En Route"
+  | "On Scene"
+  | "Responding"
+  | "Busy"
+  | "Offline";
 
 export type ResourceType =
   | "Ambulance"
@@ -23,11 +31,12 @@ export type ResourceType =
   | "Rescue Equipment"
   | "Water Rescue Equipment";
 
-export type ResourceStatus = "Available" | "Dispatched" | "Under Maintenance" | "Unavailable" | "Reserved";
+export type ResourceStatus =
+  "Available" | "Dispatched" | "Under Maintenance" | "Unavailable" | "Reserved";
 
 export type UserRole = "Personnel" | "Admin" | "Super Admin";
 
-export type ValidationStatus = "Verified" | "False Alarm" | "Pending Review";
+export type ValidationStatus = "Confirmed" | "False Alarm" | "Pending Review";
 
 export interface Incident {
   id: string;
@@ -41,12 +50,30 @@ export interface Incident {
   callerContext: string;
   assignedResponder: string;
   priority: "Critical" | "High" | "Moderate";
+  buzzerActive?: boolean;
+  buzzerUpdatedAt?: string;
+  fieldNoteCount?: number;
+  latestFieldNote?: string;
+  latestFieldNoteAt?: string;
+  fieldNotes?: FieldNote[];
+}
+
+export interface FieldNote {
+  status: IncidentStatus;
+  remarks: string;
+  createdAt: string;
 }
 
 export interface Responder {
   id: string;
   name: string;
-  agency: "MDRRMO Rescue Unit" | "MDRRMO" | "PNP" | "BFP" | "EMS" | "Barangay Responders";
+  agency:
+    | "MDRRMO Rescue Unit"
+    | "MDRRMO"
+    | "PNP"
+    | "BFP"
+    | "EMS"
+    | "Barangay Responders";
   role: string;
   contactNumber: string;
   availability: ResponderStatus;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AirlineSeatFlatIcon from "@mui/icons-material/AirlineSeatFlat";
 import FireTruckIcon from "@mui/icons-material/FireTruck";
 import GroupsIcon from "@mui/icons-material/Groups";
@@ -14,6 +14,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
+import { NODEGUARD_REALTIME_EVENT } from "@/components/RealtimeRefresh";
 import { ResponderSummaryCard } from "@/components/responders/ResponderSummaryCard";
 import { ResponderTable } from "@/components/responders/ResponderTable";
 import { ResourceAssignmentDialog, AssignmentTarget } from "@/components/responders/ResourceAssignmentDialog";
@@ -23,6 +24,7 @@ import {
   RespondersResourcesFilters
 } from "@/components/responders/RespondersResourcesFilters";
 import { incidents } from "@/data/incidents";
+import { fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
 import { responders as responderSeed } from "@/data/responders";
 import { resources as resourceSeed } from "@/data/resources";
 import { mdrrmoPalette } from "@/theme/theme";
@@ -43,16 +45,34 @@ export default function RespondersPage() {
   const [selectedIncident, setSelectedIncident] = useState("");
   const [selectedTeam, setSelectedTeam] = useState("");
   const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState("Assignment updated successfully.");
+  const [incidentItems, setIncidentItems] = useState(incidents);
+  const [isAssigning, setIsAssigning] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadOperationsData = () => Promise.all([fetchResponders(), fetchIncidents()]).then(([nextResponders, nextIncidents]) => {
+      if (!mounted) return;
+      setResponders(nextResponders);
+      setIncidentItems(nextIncidents);
+    });
+    loadOperationsData();
+    window.addEventListener(NODEGUARD_REALTIME_EVENT, loadOperationsData);
+    return () => {
+      mounted = false;
+      window.removeEventListener(NODEGUARD_REALTIME_EVENT, loadOperationsData);
+    };
+  }, []);
 
   const activeIncidents = useMemo(
-    () => incidents.filter((incident) => !["Resolved", "Closed"].includes(incident.status)),
-    []
+    () => incidentItems.filter((incident) => !["Resolved", "Closed", "False Alert"].includes(incident.status)),
+    [incidentItems]
   );
 
   const assignableTeams = useMemo(
     () =>
       responders.filter((responder) =>
-        ["Available", "Dispatched", "Responding"].includes(responder.availability)
+        ["Available", "En Route", "On Scene", "Responding", "Busy"].includes(responder.availability)
       ),
     [responders]
   );
@@ -81,8 +101,8 @@ export default function RespondersPage() {
   );
 
   const availableResponders = responders.filter((responder) => responder.availability === "Available").length;
-  const respondersDispatched = responders.filter((responder) =>
-    ["Dispatched", "Responding", "Busy"].includes(responder.availability)
+  const activeResponders = responders.filter((responder) =>
+    ["En Route", "On Scene", "Responding", "Busy"].includes(responder.availability)
   ).length;
   const availableAmbulances = resources.filter(
     (resource) => resource.type === "Ambulance" && resource.status === "Available"
@@ -100,21 +120,45 @@ export default function RespondersPage() {
     setSelectedTeam(target.kind === "resource" ? (assignableTeams[0]?.id ?? "") : "");
   };
 
-  const handleConfirmAssignment = () => {
+  const handleConfirmAssignment = async () => {
     if (!assignmentTarget) return;
 
     if (assignmentTarget.kind === "responder") {
       if (!selectedIncident) return;
+      setIsAssigning(true);
+      const response = await fetch("/api/assign-responder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responderId: assignmentTarget.id, incidentId: selectedIncident })
+      });
+      const result = (await response.json()) as { ok: boolean; reason?: string };
+      setIsAssigning(false);
+      if (!result.ok) {
+        setSnackbarMessage(result.reason ?? "Assignment failed.");
+        setSnackbarOpen(true);
+        return;
+      }
       setResponders((current) =>
         current.map((responder) =>
           responder.id === assignmentTarget.id
             ? {
                 ...responder,
-                availability: "Dispatched",
+                availability: "Busy",
                 currentAssignment: selectedIncident,
                 lastStatusUpdate: "Just now"
               }
             : responder
+        )
+      );
+      setIncidentItems((current) =>
+        current.map((incident) =>
+          incident.id === selectedIncident
+            ? {
+                ...incident,
+                status: "Assigned",
+                assignedResponder: assignmentTarget.name
+              }
+            : incident
         )
       );
     } else {
@@ -135,6 +179,7 @@ export default function RespondersPage() {
     }
 
     setAssignmentTarget(null);
+    setSnackbarMessage("Assignment updated successfully.");
     setSnackbarOpen(true);
   };
 
@@ -158,9 +203,9 @@ export default function RespondersPage() {
           </Grid>
           <Grid size={{ xs: 12, sm: 6, lg: 2.4 }}>
             <ResponderSummaryCard
-              label="Responders Dispatched"
-              value={respondersDispatched}
-              helper="Busy, dispatched, or responding"
+              label="Active Responders"
+              value={activeResponders}
+              helper="Busy, en route, on scene, or responding"
               icon={<ReportProblemIcon />}
               tone={mdrrmoPalette.warningAmber}
             />
@@ -243,12 +288,13 @@ export default function RespondersPage() {
         onSelectedTeam={setSelectedTeam}
         onClose={() => setAssignmentTarget(null)}
         onConfirm={handleConfirmAssignment}
+        isConfirming={isAssigning}
       />
       <Snackbar
         open={snackbarOpen}
         autoHideDuration={3200}
         onClose={() => setSnackbarOpen(false)}
-        message="Assignment updated successfully."
+        message={snackbarMessage}
       />
     </AppShell>
   );

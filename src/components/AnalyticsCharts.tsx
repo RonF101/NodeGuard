@@ -199,7 +199,7 @@ function AnalyticsFilters({
               Status
             </Typography>
             <Select fullWidth value={status} onChange={(event) => onStatus(event.target.value as StatusFilter)}>
-              {["All", "Verified", "False Alarm", "Pending Review", "Resolved"].map((item) => (
+              {["All", "Confirmed", "False Alarm", "Pending Review", "Resolved"].map((item) => (
                 <MenuItem key={item} value={item}>
                   {item}
                 </MenuItem>
@@ -257,9 +257,9 @@ function NodeAnalyticsTable({ rows }: { rows: NodeAnalyticsRow[] }) {
             <TableCell>Medical</TableCell>
             <TableCell>Security/Public Safety</TableCell>
             <TableCell>Fire/Disaster</TableCell>
-            <TableCell>Verified</TableCell>
+            <TableCell>Confirmed</TableCell>
             <TableCell>False Alarms</TableCell>
-            <TableCell>Pending</TableCell>
+            <TableCell>Pending Review</TableCell>
             <TableCell>Risk Level</TableCell>
             <TableCell>Recommendation</TableCell>
           </TableRow>
@@ -333,7 +333,7 @@ export function AnalyticsCharts() {
   }));
 
   const totalThisWeek = weeklyIncidents.length;
-  const verifiedThisWeek = weeklyIncidents.filter((incident) => incident.validationStatus === "Verified").length;
+  const verifiedThisWeek = weeklyIncidents.filter((incident) => incident.validationStatus === "Confirmed").length;
   const falseThisWeek = weeklyIncidents.filter((incident) => incident.validationStatus === "False Alarm").length;
   const pendingThisWeek = weeklyIncidents.filter((incident) => incident.validationStatus === "Pending Review").length;
   const mostActiveNode = weeklyRows.toSorted((a, b) => b.totalIncidents - a.totalIncidents)[0];
@@ -356,7 +356,7 @@ export function AnalyticsCharts() {
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
           <AnalyticsSummaryCard
-            label="Verified Alerts"
+            label="Confirmed Alerts"
             value={verifiedThisWeek}
             helper="Confirmed emergency activity"
             icon={<FactCheckIcon />}
@@ -374,7 +374,7 @@ export function AnalyticsCharts() {
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
           <AnalyticsSummaryCard
-            label="Pending Verification"
+            label="Pending Review"
             value={pendingThisWeek}
             helper="Needs personnel review"
             icon={<ReviewsIcon />}
@@ -441,7 +441,7 @@ export function AnalyticsCharts() {
           </ChartCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
-          <ChartCard title="False vs Verified Alarms per Device This Week">
+          <ChartCard title="False vs Confirmed Alarms per Device This Week">
             <ResponsiveContainer width="100%" height="82%">
               <BarChart data={validationByDevice}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -449,7 +449,7 @@ export function AnalyticsCharts() {
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="verified" name="Verified" fill={mdrrmoPalette.successGreen} radius={[5, 5, 0, 0]} />
+                <Bar dataKey="verified" name="Confirmed" fill={mdrrmoPalette.successGreen} radius={[5, 5, 0, 0]} />
                 <Bar dataKey="falseAlarms" name="False Alarm" fill={mdrrmoPalette.alertRed} radius={[5, 5, 0, 0]} />
                 <Bar dataKey="pending" name="Pending" fill={mdrrmoPalette.warningAmber} radius={[5, 5, 0, 0]} />
               </BarChart>
@@ -498,3 +498,4 @@ export function AnalyticsCharts() {
     </Stack>
   );
 }
+

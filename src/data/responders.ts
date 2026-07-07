@@ -27,7 +27,7 @@ export const responders: Responder[] = [
     agency: "BFP",
     role: "Fire Suppression Crew",
     contactNumber: "(074) 422-1131",
-    availability: "Dispatched",
+    availability: "Responding",
     currentAssignment: "NG-2026-069",
     lastStatusUpdate: "2026-07-06 08:12"
   },
@@ -37,7 +37,7 @@ export const responders: Responder[] = [
     agency: "PNP",
     role: "Public Safety Patrol",
     contactNumber: "0907-117-9901",
-    availability: "Dispatched",
+    availability: "En Route",
     currentAssignment: "NG-2026-070",
     lastStatusUpdate: "2026-07-06 08:18"
   },

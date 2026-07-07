@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Alert from "@mui/material/Alert";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Grid from "@mui/material/Grid";
@@ -11,35 +12,86 @@ import { AppShell } from "@/components/AppShell";
 import { IncidentModal } from "@/components/IncidentModal";
 import { IncidentTable } from "@/components/IncidentTable";
 import { PageHeader } from "@/components/PageHeader";
+import { NODEGUARD_REALTIME_EVENT } from "@/components/RealtimeRefresh";
 import { incidents } from "@/data/incidents";
-import { EmergencyCategory, Incident, IncidentStatus } from "@/types";
+import { fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
+import {
+  EmergencyCategory,
+  Incident,
+  IncidentStatus,
+  Responder,
+} from "@/types";
 
 const categories: Array<EmergencyCategory | "All"> = [
   "All",
   "Medical Emergency",
   "Security/Public Safety",
-  "Fire/Disaster Emergency"
+  "Fire/Disaster Emergency",
 ];
-const statuses: Array<IncidentStatus | "All"> = ["All", "Pending", "Verified", "Dispatched", "Responding", "Resolved", "Closed"];
+const statuses: Array<IncidentStatus | "All"> = [
+  "All",
+  "New Alert",
+  "Assigned",
+  "En Route",
+  "On Scene",
+  "Responding",
+  "Resolved",
+  "Closed",
+  "Need Backup",
+  "False Alert",
+];
 
 export default function LiveAlertsPage() {
   const [category, setCategory] = useState<EmergencyCategory | "All">("All");
   const [status, setStatus] = useState<IncidentStatus | "All">("All");
   const [selected, setSelected] = useState<Incident | null>(null);
+  const [items, setItems] = useState<Incident[]>(incidents);
+  const [responders, setResponders] = useState<Responder[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+
+  const loadIncidents = useCallback(() => {
+    return Promise.all([fetchIncidents(), fetchResponders()]).then(
+      ([nextIncidents, nextResponders]) => {
+        setItems(nextIncidents);
+        setResponders(nextResponders);
+        setIsConnected(nextIncidents !== incidents);
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadIfMounted = () =>
+      loadIncidents().then(() => {
+        if (!mounted) return;
+      });
+    loadIfMounted();
+    window.addEventListener(NODEGUARD_REALTIME_EVENT, loadIfMounted);
+    return () => {
+      mounted = false;
+      window.removeEventListener(NODEGUARD_REALTIME_EVENT, loadIfMounted);
+    };
+  }, [loadIncidents]);
 
   const filteredIncidents = useMemo(
     () =>
-      incidents.filter((incident) => {
-        const categoryMatch = category === "All" || incident.category === category;
+      items.filter((incident) => {
+        const categoryMatch =
+          category === "All" || incident.category === category;
         const statusMatch = status === "All" || incident.status === status;
         return categoryMatch && statusMatch;
       }),
-    [category, status]
+    [category, items, status],
   );
 
   return (
     <AppShell>
       <PageHeader eyebrow="NodeGuard Device Intake" title="Live Alerts" />
+      <Alert severity={isConnected ? "success" : "info"} sx={{ mb: 2 }}>
+        {isConnected
+          ? "Connected to Supabase incident data."
+          : "Using local mock data until Supabase environment variables are configured."}
+      </Alert>
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Grid container spacing={2}>
@@ -49,7 +101,9 @@ export default function LiveAlertsPage() {
                 fullWidth
                 label="Category"
                 value={category}
-                onChange={(event) => setCategory(event.target.value as EmergencyCategory | "All")}
+                onChange={(event) =>
+                  setCategory(event.target.value as EmergencyCategory | "All")
+                }
               >
                 {categories.map((item) => (
                   <MenuItem key={item} value={item}>
@@ -64,7 +118,9 @@ export default function LiveAlertsPage() {
                 fullWidth
                 label="Status"
                 value={status}
-                onChange={(event) => setStatus(event.target.value as IncidentStatus | "All")}
+                onChange={(event) =>
+                  setStatus(event.target.value as IncidentStatus | "All")
+                }
               >
                 {statuses.map((item) => (
                   <MenuItem key={item} value={item}>
@@ -77,9 +133,20 @@ export default function LiveAlertsPage() {
         </CardContent>
       </Card>
       <Stack spacing={2}>
-        <IncidentTable incidents={filteredIncidents} onView={setSelected} showVoice />
+        <IncidentTable
+          incidents={filteredIncidents}
+          onView={setSelected}
+          showVoice
+        />
       </Stack>
-      <IncidentModal incident={selected} open={Boolean(selected)} onClose={() => setSelected(null)} />
+      <IncidentModal
+        key={selected?.id ?? "alerts-incident-modal"}
+        incident={selected}
+        open={Boolean(selected)}
+        responders={responders}
+        onClose={() => setSelected(null)}
+        onAssigned={loadIncidents}
+      />
     </AppShell>
   );
 }

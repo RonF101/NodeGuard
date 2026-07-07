@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { useState } from "react";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import LockIcon from "@mui/icons-material/Lock";
 import MailIcon from "@mui/icons-material/Mail";
+import Alert from "@mui/material/Alert";
 import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -18,10 +20,36 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { BrandLogo } from "@/components/BrandLogo";
+import { getSupabaseClient } from "@/lib/supabaseClient";
 import { mdrrmoPalette } from "@/theme/theme";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [email, setEmail] = useState("personnel@ltdrrmo.local");
+  const [password, setPassword] = useState("password");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleLogin = async () => {
+    setError(null);
+    setIsSubmitting(true);
+    const supabase = getSupabaseClient();
+
+    if (!supabase) {
+      router.push("/dashboard");
+      return;
+    }
+
+    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    setIsSubmitting(false);
+
+    if (authError) {
+      setError(authError.message);
+      return;
+    }
+
+    router.push("/dashboard");
+  };
 
   return (
     <Box
@@ -109,6 +137,8 @@ export default function LoginPage() {
                   label="Email"
                   placeholder="personnel@ltdrrmo.local"
                   fullWidth
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
                   slotProps={{
                     input: {
                       startAdornment: (
@@ -123,6 +153,8 @@ export default function LoginPage() {
                   label="Password"
                   type="password"
                   fullWidth
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
                   slotProps={{
                     input: {
                       startAdornment: (
@@ -138,13 +170,14 @@ export default function LoginPage() {
                     <Chip key={role} label={role} icon={<AdminPanelSettingsIcon />} variant="outlined" />
                   ))}
                 </Stack>
-                <Button size="large" onClick={() => router.push("/dashboard")}>
-                  Login to Dashboard
+                {error && <Alert severity="error">{error}</Alert>}
+                <Button size="large" onClick={handleLogin} disabled={isSubmitting}>
+                  {isSubmitting ? "Signing In..." : "Login to Dashboard"}
                 </Button>
               </Stack>
               <Divider sx={{ my: 4 }} />
               <Typography variant="body2" color="text.secondary">
-                Prototype only: authentication and role-based authorization are placeholders for future integration.
+                Supabase Auth is used when environment variables are configured; otherwise this remains a local prototype login.
               </Typography>
             </CardContent>
           </Card>

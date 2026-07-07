@@ -25,6 +25,7 @@ type ResourceAssignmentDialogProps = {
   onSelectedTeam: (teamId: string) => void;
   onClose: () => void;
   onConfirm: () => void;
+  isConfirming?: boolean;
 };
 
 export function ResourceAssignmentDialog({
@@ -36,7 +37,8 @@ export function ResourceAssignmentDialog({
   onSelectedIncident,
   onSelectedTeam,
   onClose,
-  onConfirm
+  onConfirm,
+  isConfirming = false
 }: ResourceAssignmentDialogProps) {
   const isResource = target?.kind === "resource";
   const canConfirm = isResource ? Boolean(selectedTeam) : Boolean(selectedIncident);
@@ -87,8 +89,8 @@ export function ResourceAssignmentDialog({
         <Button variant="outlined" onClick={onClose}>
           Cancel
         </Button>
-        <Button onClick={onConfirm} disabled={!canConfirm}>
-          Confirm Assignment
+        <Button onClick={onConfirm} disabled={!canConfirm || isConfirming}>
+          {isConfirming ? "Assigning..." : "Confirm Assignment"}
         </Button>
       </DialogActions>
     </Dialog>

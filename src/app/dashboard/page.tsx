@@ -12,17 +12,19 @@ import Grid from "@mui/material/Grid";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { AppShell } from "@/components/AppShell";
-import { IncidentTable } from "@/components/IncidentTable";
+import { DashboardIncidentPanel } from "@/components/DashboardIncidentPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
-import { incidents } from "@/data/incidents";
-import { responders } from "@/data/responders";
+import { fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
 import { mdrrmoPalette } from "@/theme/theme";
 
-export default function DashboardPage() {
-  const activeIncidents = incidents.filter((incident) => !["Resolved", "Closed"].includes(incident.status)).length;
-  const pending = incidents.filter((incident) => incident.status === "Pending").length;
-  const dispatched = responders.filter((responder) => ["Dispatched", "Responding"].includes(responder.availability)).length;
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage() {
+  const [incidents, responders] = await Promise.all([fetchIncidents(), fetchResponders()]);
+  const activeIncidents = incidents.filter((incident) => !["Resolved", "Closed", "False Alert"].includes(incident.status)).length;
+  const newAlerts = incidents.filter((incident) => incident.status === "New Alert").length;
+  const respondersActive = responders.filter((responder) => ["En Route", "On Scene", "Responding", "Busy"].includes(responder.availability)).length;
   const resolvedToday = incidents.filter((incident) => incident.status === "Resolved").length;
 
   return (
@@ -53,18 +55,18 @@ export default function DashboardPage() {
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <StatCard
-            label="Pending Verification"
-            value={pending}
-            helper="Awaiting personnel review"
+            label="New Alerts"
+            value={newAlerts}
+            helper="Newly activated nodes needing triage"
             tone={mdrrmoPalette.warningAmber}
             icon={<FactCheckIcon />}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <StatCard
-            label="Responders Dispatched"
-            value={dispatched}
-            helper="Teams en route or responding"
+            label="Active Responders"
+            value={respondersActive}
+            helper="Busy, en route, on scene, or responding"
             tone={mdrrmoPalette.orange}
             icon={<AssignmentTurnedInIcon />}
           />
@@ -91,7 +93,7 @@ export default function DashboardPage() {
               </Typography>
             </Box>
           </Stack>
-          <IncidentTable incidents={incidents.slice(0, 5)} />
+          <DashboardIncidentPanel incidents={incidents.slice(0, 5)} responders={responders} />
         </CardContent>
       </Card>
     </AppShell>
