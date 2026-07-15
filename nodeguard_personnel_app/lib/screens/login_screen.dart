@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/supabase_service.dart';
 import '../theme/app_colors.dart';
@@ -12,10 +13,11 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController =
-      TextEditingController(text: 'responder@nodeguard.local');
-  final _passwordController = TextEditingController(text: 'password');
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _isSubmitting = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -25,14 +27,50 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
+    if (SupabaseService.isConfigured &&
+        !(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
     setState(() => _isSubmitting = true);
     try {
       final client = SupabaseService.client;
       if (client != null) {
-        await client.auth.signInWithPassword(
+        final auth = await client.auth.signInWithPassword(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
+        final userId = auth.user?.id;
+        if (userId == null) {
+          throw const AuthException('No authenticated user was returned.');
+        }
+
+        Map<String, dynamic>? profile;
+        try {
+          profile = await client
+              .from('profiles')
+              .select('role, is_active')
+              .eq('id', userId)
+              .maybeSingle();
+        } on PostgrestException {
+          profile = await client
+              .from('profiles')
+              .select('role')
+              .eq('id', userId)
+              .maybeSingle();
+        }
+        final responder = await client
+            .from('responders')
+            .select('id')
+            .eq('profile_id', userId)
+            .maybeSingle();
+        if (profile == null ||
+            profile['is_active'] == false ||
+            responder == null) {
+          await client.auth.signOut();
+          throw const AuthException(
+            'This account is not an active, linked NodeGuard responder.',
+          );
+        }
       }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -52,75 +90,107 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       body: SafeArea(
         child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 58,
-                        height: 58,
-                        decoration: BoxDecoration(
-                          color: AppColors.deepGreen,
-                          borderRadius: BorderRadius.circular(14),
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 58,
+                          height: 58,
+                          decoration: BoxDecoration(
+                            color: AppColors.deepGreen,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          padding: const EdgeInsets.all(5),
+                          child: Image.asset('assets/mdrrmc-logo.png'),
                         ),
-                        child: const Icon(Icons.hub_outlined,
-                            color: AppColors.orange, size: 34),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'NodeGuard Personnel',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w900),
+                              ),
+                              const Text('Authorized personnel only',
+                                  style: TextStyle(color: AppColors.mutedText)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 28),
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        prefixIcon: Icon(Icons.email_outlined),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'NodeGuard Personnel',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.w900),
-                            ),
-                            const Text('Authorized personnel only',
-                                style: TextStyle(color: AppColors.mutedText)),
-                          ],
+                      textInputAction: TextInputAction.next,
+                      validator: (value) {
+                        if (!SupabaseService.isConfigured) return null;
+                        final email = value?.trim() ?? '';
+                        return email.contains('@')
+                            ? null
+                            : 'Enter a valid email address.';
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword),
+                          icon: Icon(_obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined),
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 28),
-                  TextField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: Icon(Icons.email_outlined),
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) {
+                        if (!_isSubmitting) _login();
+                      },
+                      validator: (value) {
+                        if (!SupabaseService.isConfigured) return null;
+                        return (value?.isNotEmpty ?? false)
+                            ? null
+                            : 'Enter your password.';
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: Icon(Icons.lock_outline),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      onPressed: _isSubmitting ? null : _login,
+                      icon: const Icon(Icons.login),
+                      label: Text(_isSubmitting
+                          ? 'Signing In...'
+                          : SupabaseService.isConfigured
+                              ? 'Login'
+                              : 'Enter Demo Mode'),
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  FilledButton.icon(
-                    onPressed: _isSubmitting ? null : _login,
-                    icon: const Icon(Icons.login),
-                    label: Text(_isSubmitting ? 'Signing In...' : 'Login'),
-                  ),
-                  const SizedBox(height: 18),
-                  const Text(
-                    'Access is limited to authorized MDRRMO, EMS, BFP, PNP, and barangay response personnel.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.mutedText),
-                  ),
-                ],
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Access is limited to authorized MDRRMO, EMS, BFP, PNP, and barangay response personnel.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.mutedText),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

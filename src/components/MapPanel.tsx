@@ -1,50 +1,141 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
-import ButtonBase from "@mui/material/ButtonBase";
+import Alert from "@mui/material/Alert";
+import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Divider from "@mui/material/Divider";
 import Grid from "@mui/material/Grid";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { deviceNodes } from "@/data/devices";
-import { incidents } from "@/data/incidents";
+import { deviceNodes as deviceSeed } from "@/data/devices";
+import { incidents as incidentSeed } from "@/data/incidents";
 import { mdrrmoPalette } from "@/theme/theme";
 import { StatusChip } from "@/components/StatusChip";
 import { EmergencyCategory, Incident } from "@/types";
+import { DeviceNode } from "@/types";
+import { fetchDeviceNodes, fetchIncidents } from "@/lib/nodeguardRepository";
+import { NODEGUARD_REALTIME_EVENT } from "@/components/RealtimeRefresh";
+import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import MapIcon from "@mui/icons-material/Map";
+import LayersOutlinedIcon from "@mui/icons-material/LayersOutlined";
+import { isSupabaseConfigured } from "@/lib/supabaseClient";
+import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
 
 const categoryColors: Record<EmergencyCategory, string> = {
-  "Medical Emergency": mdrrmoPalette.alertRed,
-  "Security/Public Safety": "#1976D2",
-  "Fire/Disaster Emergency": "#C65A12"
+  "Medical Emergency": mdrrmoPalette.setBlue,
+  "Security/Public Safety": mdrrmoPalette.setBlueDark,
+  "Fire/Disaster Emergency": mdrrmoPalette.setBlue
 };
 
 function getNodeColor(incident?: Incident) {
-  if (!incident || ["Resolved", "Closed"].includes(incident.status)) {
-    return mdrrmoPalette.darkGreen;
+  if (!incident || ["Resolved", "Closed", "False Alert"].includes(incident.status)) {
+    return mdrrmoPalette.successGreen;
   }
-
+  if (["On Scene", "Responding", "Need Backup"].includes(incident.status) || incident.priority === "Critical") {
+    return mdrrmoPalette.goRed;
+  }
   return categoryColors[incident.category];
 }
 
 export function MapPanel() {
-  const [selectedId, setSelectedId] = useState(deviceNodes[0].id);
+  const { online, lowBandwidth } = useConnectivity();
+  const [deviceNodes, setDeviceNodes] = useState<DeviceNode[]>(isSupabaseConfigured() ? [] : deviceSeed);
+  const [incidents, setIncidents] = useState<Incident[]>(isSupabaseConfigured() ? [] : incidentSeed);
+  const [selectedId, setSelectedId] = useState(isSupabaseConfigured() ? "" : deviceSeed[0].id);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const selectedNode = deviceNodes.find((node) => node.id === selectedId) ?? deviceNodes[0];
+
+  const loadMapData = useCallback(async () => {
+    try {
+      const [nextNodes, nextIncidents] = await Promise.all([
+        fetchDeviceNodes(),
+        fetchIncidents(),
+      ]);
+      setDeviceNodes(nextNodes);
+      setIncidents(nextIncidents);
+      setLoadError(null);
+      if (nextNodes.length && !nextNodes.some((node) => node.id === selectedId)) {
+        setSelectedId(nextNodes[0].id);
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to load the device map.");
+    }
+  }, [selectedId]);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void loadMapData(), 0);
+    window.addEventListener(NODEGUARD_REALTIME_EVENT, loadMapData);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.removeEventListener(NODEGUARD_REALTIME_EVENT, loadMapData);
+    };
+  }, [loadMapData]);
+
   const incident = useMemo(
-    () => incidents.find((item) => item.id === selectedNode.assignedIncidentId),
-    [selectedNode.assignedIncidentId]
+    () => selectedNode ? (
+      incidents.find((item) => item.id === selectedNode.assignedIncidentId) ??
+      incidents.find(
+        (item) =>
+          item.deviceId === selectedNode.id &&
+          !["Resolved", "Closed", "False Alert"].includes(item.status),
+      )
+    ) : undefined,
+    [incidents, selectedNode]
   );
 
+  if (!selectedNode) {
+    return (
+      <Alert severity={loadError ? "error" : "info"}>
+        {loadError ?? "Loading registered NodeGuard devices…"}
+      </Alert>
+    );
+  }
+  const [latitude, longitude] = (selectedNode.geoCoordinates ?? "16.4550, 120.5888")
+    .split(",")
+    .map((value) => Number(value.trim()));
+  const lat = Number.isFinite(latitude) ? latitude : 16.455;
+  const lon = Number.isFinite(longitude) ? longitude : 120.5888;
+  const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${lon - 0.012}%2C${lat - 0.009}%2C${lon + 0.012}%2C${lat + 0.009}&layer=mapnik&marker=${lat}%2C${lon}`;
+  const externalMapUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`;
+
   return (
-    <Grid container spacing={3}>
+    <Stack spacing={2}>
+      {loadError && <Alert severity="error">{loadError}</Alert>}
+      <Grid container spacing={3}>
       <Grid size={{ xs: 12, lg: 8 }}>
         <Card>
           <CardContent>
             <Typography variant="h6" color="secondary" sx={{ mb: 2 }}>
               La Trinidad NodeGuard Device Map
             </Typography>
+            {(!online || lowBandwidth) && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                {online ? "Low-Bandwidth Mode" : "Offline · Local Sync"}: remote map tiles are deferred. Device coordinates remain available below.
+              </Alert>
+            )}
+            <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 2, flexWrap: "wrap" }}>
+              {deviceNodes.map((node) => {
+                const nodeIncident = incidents.find((item) => item.id === node.assignedIncidentId) ??
+                  incidents.find((item) => item.deviceId === node.id && !["Resolved", "Closed", "False Alert"].includes(item.status));
+                const nodeColor = getNodeColor(nodeIncident);
+                const selected = selectedId === node.id;
+                return (
+                  <Button
+                    key={node.id}
+                    size="small"
+                    variant={selected ? "contained" : "outlined"}
+                    onClick={() => setSelectedId(node.id)}
+                    aria-label={`Center map on ${node.name}`}
+                    sx={selected ? { bgcolor: nodeColor, "&:hover": { bgcolor: nodeColor } } : { borderColor: nodeColor, color: nodeColor }}
+                  >
+                    {node.id}
+                  </Button>
+                );
+              })}
+            </Stack>
             <Box
               sx={{
                 position: "relative",
@@ -52,62 +143,25 @@ export function MapPanel() {
                 overflow: "hidden",
                 borderRadius: 2,
                 border: `1px solid ${mdrrmoPalette.cream}`,
-                background:
-                  "linear-gradient(135deg, #E8F2ED 0%, #F7D6C2 48%, #F5F6F7 49%, #E8F2ED 100%)"
+                background: "#e8f2ed"
               }}
             >
-              <Box
-                sx={{
-                  position: "absolute",
-                  inset: "18% 9%",
-                  borderTop: "7px solid rgba(62,112,88,0.35)",
-                  transform: "rotate(-11deg)"
-                }}
-              />
-              <Box
-                sx={{
-                  position: "absolute",
-                  inset: "16% 26%",
-                  borderLeft: "7px solid rgba(244,127,53,0.32)",
-                  transform: "rotate(18deg)"
-                }}
-              />
-              {deviceNodes.map((node) => {
-                const nodeIncident = incidents.find((item) => item.id === node.assignedIncidentId);
-                const nodeColor = getNodeColor(nodeIncident);
-
-                return (
-                  <ButtonBase
-                    key={node.id}
-                    onClick={() => setSelectedId(node.id)}
-                    sx={{
-                      position: "absolute",
-                      left: `${node.coordinates.x}%`,
-                      top: `${node.coordinates.y}%`,
-                      transform: "translate(-50%, -50%)",
-                      width: selectedId === node.id ? 54 : 46,
-                      height: selectedId === node.id ? 54 : 46,
-                      borderRadius: "50%",
-                      bgcolor: nodeColor,
-                      color: "white",
-                      border: selectedId === node.id ? `5px solid ${mdrrmoPalette.orange}` : "3px solid white",
-                      boxShadow: "0 10px 20px rgba(36,77,58,0.25)",
-                      fontWeight: 900,
-                      display: "flex",
-                      flexDirection: "column",
-                      lineHeight: 1
-                    }}
-                    aria-label={`Select ${node.name}`}
-                  >
-                    <Box component="span" sx={{ fontSize: 14 }}>{node.id.replace("LT-NODE-", "")}</Box>
-                    {nodeIncident && !["Resolved", "Closed"].includes(nodeIncident.status) && (
-                      <Box component="span" sx={{ fontSize: 10, mt: 0.3 }}>
-                        {nodeIncident.triggerMethod === "Voice" ? "V" : "B"}
-                      </Box>
-                    )}
-                  </ButtonBase>
-                );
-              })}
+              {online && !lowBandwidth ? (
+                <Box
+                  component="iframe"
+                  title={`OpenStreetMap centered on ${selectedNode.location}`}
+                  src={mapUrl}
+                  loading="lazy"
+                  sx={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }}
+                />
+              ) : (
+                <Stack sx={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", p: 3, textAlign: "center", background: "linear-gradient(135deg, #eef4f9 25%, #e3edf5 25%, #e3edf5 50%, #eef4f9 50%, #eef4f9 75%, #e3edf5 75%)", backgroundSize: "32px 32px" }}>
+                  <MapIcon color="primary" sx={{ fontSize: 48, mb: 1 }} />
+                  <Typography variant="h6">{selectedNode.location}</Typography>
+                  <Typography sx={{ fontWeight: 900 }}>{lat.toFixed(5)}, {lon.toFixed(5)}</Typography>
+                  <Typography variant="body2" color="text.secondary">Lightweight coordinate view · no external tiles loaded</Typography>
+                </Stack>
+              )}
               <Stack
                 direction="row"
                 spacing={1}
@@ -123,10 +177,9 @@ export function MapPanel() {
                 }}
               >
                 {[
-                  ["Medical", mdrrmoPalette.alertRed],
-                  ["Public Safety", categoryColors["Security/Public Safety"]],
-                  ["Fire/Disaster", categoryColors["Fire/Disaster Emergency"]],
-                  ["Idle/Closed", mdrrmoPalette.darkGreen]
+                  ["Set / Active", mdrrmoPalette.setBlue],
+                  ["Go / Urgent", mdrrmoPalette.goRed],
+                  ["Ready / Clear", mdrrmoPalette.successGreen]
                 ].map(([label, color]) => (
                   <Stack key={label} direction="row" spacing={0.6} sx={{ alignItems: "center" }}>
                     <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: color }} />
@@ -159,6 +212,16 @@ export function MapPanel() {
                   Location
                 </Typography>
                 <Typography sx={{ fontWeight: 700 }}>{selectedNode.location}</Typography>
+                {selectedNode.approximateAddress && (
+                  <Typography variant="body2" color="text.secondary">
+                    {selectedNode.approximateAddress}
+                  </Typography>
+                )}
+                {selectedNode.geoCoordinates && (
+                  <Typography variant="body2" color="text.secondary">
+                    {selectedNode.geoCoordinates}
+                  </Typography>
+                )}
               </Box>
               <Box>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
@@ -168,6 +231,28 @@ export function MapPanel() {
                   <StatusChip status={selectedNode.status} />
                 </Stack>
               </Box>
+              <Button
+                variant="outlined"
+                component="a"
+                href={externalMapUrl}
+                target="_blank"
+                rel="noreferrer"
+                startIcon={<OpenInNewIcon />}
+                disabled={!online || lowBandwidth}
+              >
+                {online && !lowBandwidth ? "Open Full Map" : "Map Tiles Deferred"}
+              </Button>
+              <Button
+                variant="outlined"
+                component="a"
+                href="https://ltdrrmo.ph/resources/maps/"
+                target="_blank"
+                rel="noreferrer"
+                startIcon={<LayersOutlinedIcon />}
+                disabled={!online || lowBandwidth}
+              >
+                Official Hazard Maps
+              </Button>
               {incident ? (
                 <>
                   <Divider />
@@ -215,6 +300,7 @@ export function MapPanel() {
           </CardContent>
         </Card>
       </Grid>
-    </Grid>
+      </Grid>
+    </Stack>
   );
 }

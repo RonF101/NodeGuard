@@ -17,6 +17,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Authorized personnel only'), findsOneWidget);
-    expect(find.text('Login'), findsOneWidget);
+    expect(find.text('Enter Demo Mode'), findsOneWidget);
   });
 }

@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../services/supabase_service.dart';
 import 'login_screen.dart';
+import 'main_shell.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -18,7 +20,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(milliseconds: 1300), _goToLogin);
+    _timer = Timer(const Duration(milliseconds: 1300), _continue);
   }
 
   @override
@@ -27,10 +29,14 @@ class _SplashScreenState extends State<SplashScreen> {
     super.dispose();
   }
 
-  void _goToLogin() {
+  void _continue() {
     if (!mounted) return;
+    final hasSession = SupabaseService.client?.auth.currentSession != null;
     Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LoginScreen()));
+      MaterialPageRoute(
+        builder: (_) => hasSession ? const MainShell() : const LoginScreen(),
+      ),
+    );
   }
 
   @override
@@ -51,8 +57,8 @@ class _SplashScreenState extends State<SplashScreen> {
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(color: AppColors.orange, width: 4),
                 ),
-                child: const Icon(Icons.hub_outlined,
-                    color: AppColors.orange, size: 58),
+                padding: const EdgeInsets.all(8),
+                child: Image.asset('assets/mdrrmc-logo.png'),
               ),
               const SizedBox(height: 24),
               Text(
@@ -73,8 +79,7 @@ class _SplashScreenState extends State<SplashScreen> {
                     fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 34),
-              FilledButton(
-                  onPressed: _goToLogin, child: const Text('Get Started')),
+              FilledButton(onPressed: _continue, child: const Text('Continue')),
             ],
           ),
         ),

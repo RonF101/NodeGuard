@@ -6,6 +6,15 @@ import '../models/incident.dart';
 import '../models/responder.dart';
 import 'supabase_service.dart';
 
+class NodeGuardDataException implements Exception {
+  const NodeGuardDataException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class NodeGuardRepository {
   const NodeGuardRepository();
 
@@ -13,7 +22,6 @@ class NodeGuardRepository {
 
   Future<List<Incident>> fetchIncidents({
     String? assignedResponderName,
-    bool fallbackWhenAssignedEmpty = true,
   }) async {
     final client = SupabaseService.client;
     if (client == null) {
@@ -25,15 +33,11 @@ class NodeGuardRepository {
         client: client,
         assignedResponderName: assignedResponderName,
       );
-      if (rows.isEmpty &&
-          assignedResponderName != null &&
-          fallbackWhenAssignedEmpty) {
-        final fallbackRows = await _fetchIncidentRows(client: client);
-        return fallbackRows.map(_incidentFromRow).toList();
-      }
-      return rows.map(_incidentFromRow).toList();
-    } on PostgrestException {
-      return _mockIncidentsFor(assignedResponderName);
+      return Future.wait(rows.map((row) => _incidentFromRow(row, client)));
+    } on PostgrestException catch (error) {
+      throw NodeGuardDataException(
+        'Unable to load live incidents: ${error.message}',
+      );
     }
   }
 
@@ -88,10 +92,16 @@ class NodeGuardRepository {
           .select()
           .eq('profile_id', client.auth.currentUser?.id ?? '')
           .maybeSingle();
-      if (row == null) return mockResponder;
+      if (row == null) {
+        throw const NodeGuardDataException(
+          'This account is not linked to a NodeGuard responder profile.',
+        );
+      }
       return _responderFromRow(row);
-    } on PostgrestException {
-      return mockResponder;
+    } on PostgrestException catch (error) {
+      throw NodeGuardDataException(
+        'Unable to load the responder profile: ${error.message}',
+      );
     }
   }
 
@@ -101,7 +111,7 @@ class NodeGuardRepository {
     required String remarks,
   }) async {
     final client = SupabaseService.client;
-    if (client == null) return false;
+    if (client == null) return true;
 
     try {
       final incident = await client
@@ -125,7 +135,7 @@ class NodeGuardRepository {
 
   Future<bool> updateAvailability(AvailabilityStatus availability) async {
     final client = SupabaseService.client;
-    if (client == null) return false;
+    if (client == null) return true;
 
     try {
       final userId = client.auth.currentUser?.id;
@@ -150,7 +160,7 @@ class NodeGuardRepository {
     required bool active,
   }) async {
     final client = SupabaseService.client;
-    if (client == null) return false;
+    if (client == null) return true;
 
     try {
       await client.rpc('set_device_buzzer', params: {
@@ -164,10 +174,25 @@ class NodeGuardRepository {
     }
   }
 
-  Incident _incidentFromRow(Map<String, dynamic> row) {
+  Future<Incident> _incidentFromRow(
+    Map<String, dynamic> row,
+    SupabaseClient client,
+  ) async {
     final status = _statusFromDb(row['status'] as String?);
     final notes = _notesFromRow(row);
     final device = _deviceLocationFromRow(row);
+    final voice = _voiceContextFromRow(row);
+    String? voiceUrl;
+    final storagePath = voice?['storage_path'];
+    if (storagePath is String && storagePath.isNotEmpty) {
+      try {
+        voiceUrl = await client.storage
+            .from('voice-contexts')
+            .createSignedUrl(storagePath, 900);
+      } on StorageException {
+        voiceUrl = null;
+      }
+    }
     return Incident(
       id: row['public_id'] as String? ?? 'NG-UNKNOWN',
       category: _categoryFromDb(row['category'] as String?),
@@ -181,7 +206,8 @@ class NodeGuardRepository {
           DateTime.now(),
       priority: _priorityFromDb(row['priority'] as String?),
       status: status,
-      voiceContextAvailable: row['voice_context_available'] as bool? ?? false,
+      voiceContextAvailable:
+          row['voice_context_available'] as bool? ?? voice != null,
       voiceDuration: row['voice_duration'] as String? ?? '00:00',
       assignedUnit: row['assigned_unit'] as String? ?? 'Unassigned unit',
       assignedResponder:
@@ -197,7 +223,18 @@ class NodeGuardRepository {
       buzzerActive: device?['buzzer_active'] as bool? ?? false,
       buzzerUpdatedAt:
           DateTime.tryParse(device?['buzzer_updated_at'] as String? ?? ''),
+      voiceUrl: voiceUrl,
+      voiceTranscript: voice?['transcript'] as String?,
     );
+  }
+
+  Map<String, dynamic>? _voiceContextFromRow(Map<String, dynamic> row) {
+    final voice = row['voice_contexts'];
+    if (voice is Map<String, dynamic>) return voice;
+    if (voice is List && voice.isNotEmpty && voice.first is Map) {
+      return Map<String, dynamic>.from(voice.first as Map);
+    }
+    return null;
   }
 
   Map<String, dynamic>? _deviceLocationFromRow(Map<String, dynamic> row) {
@@ -373,7 +410,8 @@ assigned_responder_name,
 caller_context,
 coordinates,
 incident_status_updates(remarks, status, created_at),
-device_locations(buzzer_active, buzzer_updated_at)
+device_locations(buzzer_active, buzzer_updated_at),
+voice_contexts(storage_path, transcript, duration_seconds)
 ''';
 
 const _incidentSelectColumnsWithoutBuzzer = '''

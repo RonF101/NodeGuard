@@ -1,8 +1,23 @@
 import { deviceNodes as mockDeviceNodes } from "@/data/devices";
 import { incidents as mockIncidents } from "@/data/incidents";
 import { responders as mockResponders } from "@/data/responders";
-import { DeviceNode, Incident, IncidentStatus, Responder } from "@/types";
+import { resources as mockResources } from "@/data/resources";
+import {
+  DeviceNode,
+  Incident,
+  IncidentStatus,
+  Responder,
+  ResponseResource,
+  ValidationStatus,
+} from "@/types";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+
+export class NodeGuardRepositoryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NodeGuardRepositoryError";
+  }
+}
 
 type IncidentRow = {
   id?: string;
@@ -24,6 +39,9 @@ type IncidentRow = {
   trigger_method: "button" | "voice";
   voice_context_available: boolean;
   caller_context: string;
+  approximate_address?: string;
+  node_location?: string;
+  coordinates?: string;
   assigned_responder_name: string | null;
   priority: "critical" | "high" | "medium" | "low";
   incident_status_updates?: Array<{
@@ -41,10 +59,24 @@ type IncidentRow = {
         buzzer_updated_at: string | null;
       }>
     | null;
+  validation_status?: "pending_review" | "confirmed" | "false_alarm" | null;
+  voice_contexts?:
+    | {
+        storage_path: string | null;
+        transcript: string | null;
+        duration_seconds: number | null;
+      }
+    | Array<{
+        storage_path: string | null;
+        transcript: string | null;
+        duration_seconds: number | null;
+      }>
+    | null;
 };
 
 type ResponderRow = {
   id?: string;
+  profile_id?: string | null;
   public_code: string;
   name: string;
   agency_unit: Responder["agency"];
@@ -61,44 +93,71 @@ type DeviceLocationRow = {
   location_name: string;
   map_x: number;
   map_y: number;
+  approximate_address?: string;
+  coordinates?: string;
+  zone?: string;
   status: "online" | "maintenance" | "offline";
 };
 
+type ResourceRow = {
+  public_code: string;
+  resource_type: ResponseResource["type"];
+  unit_name: string;
+  agency: ResponseResource["agency"];
+  status: "available" | "dispatched" | "under_maintenance" | "unavailable" | "reserved";
+  base_location: string;
+  assigned_incident_public_id: string | null;
+  notes: string | null;
+  updated_at: string;
+};
+
+const incidentSelectEnhanced =
+  "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, validation_status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, incident_status_updates(remarks, created_at, status), device_locations(buzzer_active, buzzer_updated_at), voice_contexts(storage_path, transcript, duration_seconds)";
+
 const incidentSelectWithBuzzer =
-  "id, public_id, category, device_id, location_name, occurred_at, status, trigger_method, voice_context_available, caller_context, assigned_responder_name, priority, incident_status_updates(remarks, created_at, status), device_locations(buzzer_active, buzzer_updated_at)";
+  "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, incident_status_updates(remarks, created_at, status), device_locations(buzzer_active, buzzer_updated_at)";
 
 const incidentSelectWithoutBuzzer =
-  "id, public_id, category, device_id, location_name, occurred_at, status, trigger_method, voice_context_available, caller_context, assigned_responder_name, priority, incident_status_updates(remarks, created_at, status)";
+  "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, incident_status_updates(remarks, created_at, status)";
 
 export async function fetchIncidents(): Promise<Incident[]> {
   const supabase = getSupabaseClient();
   if (!supabase) return mockIncidents;
 
-  const primary = await supabase
+  const enhanced = await supabase
     .from("incidents")
-    .select(incidentSelectWithBuzzer)
+    .select(incidentSelectEnhanced)
     .order("occurred_at", { ascending: false });
-  let data: unknown = primary.data;
-  let error = primary.error;
+  let data: unknown = enhanced.data;
+  let error = enhanced.error;
 
   if (error) {
-    const retry = await supabase
+    const buzzerRetry = await supabase
+      .from("incidents")
+      .select(incidentSelectWithBuzzer)
+      .order("occurred_at", { ascending: false });
+    data = buzzerRetry.data;
+    error = buzzerRetry.error;
+  }
+
+  if (error) {
+    const legacyRetry = await supabase
       .from("incidents")
       .select(incidentSelectWithoutBuzzer)
       .order("occurred_at", { ascending: false });
-    data = retry.data;
-    error = retry.error;
+    data = legacyRetry.data;
+    error = legacyRetry.error;
   }
 
   if (error || !data) {
-    console.warn(
-      "Using mock incidents because Supabase fetch failed:",
-      error?.message,
+    throw new NodeGuardRepositoryError(
+      `Unable to load live incidents: ${error?.message ?? "No data returned."}`,
     );
-    return mockIncidents;
   }
 
-  return (data as IncidentRow[]).map(mapIncidentRow);
+  return Promise.all(
+    (data as IncidentRow[]).map((row) => mapIncidentRow(row, supabase)),
+  );
 }
 
 export async function fetchResponders(): Promise<Responder[]> {
@@ -108,16 +167,14 @@ export async function fetchResponders(): Promise<Responder[]> {
   const { data, error } = await supabase
     .from("responders")
     .select(
-      "id, public_code, name, agency_unit, role, contact_number, availability, current_assignment, last_status_update",
+      "id, profile_id, public_code, name, agency_unit, role, contact_number, availability, current_assignment, last_status_update",
     )
     .order("name");
 
   if (error || !data) {
-    console.warn(
-      "Using mock responders because Supabase fetch failed:",
-      error?.message,
+    throw new NodeGuardRepositoryError(
+      `Unable to load live responders: ${error?.message ?? "No data returned."}`,
     );
-    return mockResponders;
   }
 
   return (data as ResponderRow[]).map((row) => ({
@@ -138,15 +195,15 @@ export async function fetchDeviceNodes(): Promise<DeviceNode[]> {
 
   const { data, error } = await supabase
     .from("device_locations")
-    .select("device_id, name, location_name, map_x, map_y, status")
+    .select(
+      "device_id, name, location_name, approximate_address, coordinates, map_x, map_y, zone, status",
+    )
     .order("device_id");
 
   if (error || !data) {
-    console.warn(
-      "Using mock device nodes because Supabase fetch failed:",
-      error?.message,
+    throw new NodeGuardRepositoryError(
+      `Unable to load registered nodes: ${error?.message ?? "No data returned."}`,
     );
-    return mockDeviceNodes;
   }
 
   return (data as DeviceLocationRow[]).map((row) => ({
@@ -157,7 +214,44 @@ export async function fetchDeviceNodes(): Promise<DeviceNode[]> {
       x: Number(row.map_x),
       y: Number(row.map_y),
     },
-    status: row.status === "maintenance" ? "Maintenance" : "Online",
+    geoCoordinates: row.coordinates,
+    approximateAddress: row.approximate_address,
+    zone: row.zone,
+    status:
+      row.status === "maintenance"
+        ? "Maintenance"
+        : row.status === "offline"
+          ? "Offline"
+          : "Online",
+  }));
+}
+
+export async function fetchResources(): Promise<ResponseResource[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return mockResources;
+
+  const { data, error } = await supabase
+    .from("response_resources")
+    .select(
+      "public_code, resource_type, unit_name, agency, status, base_location, assigned_incident_public_id, notes, updated_at",
+    )
+    .order("public_code");
+  if (error || !data) {
+    throw new NodeGuardRepositoryError(
+      `Unable to load response resources: ${error?.message ?? "No data returned."}`,
+    );
+  }
+
+  return (data as ResourceRow[]).map((row) => ({
+    id: row.public_code,
+    type: row.resource_type,
+    unitName: row.unit_name,
+    agency: row.agency,
+    status: mapResourceStatus(row.status),
+    baseLocation: row.base_location,
+    assignedIncident: row.assigned_incident_public_id ?? "None",
+    notes: row.notes ?? "",
+    lastUpdated: formatTimestamp(row.updated_at),
   }));
 }
 
@@ -193,101 +287,93 @@ export async function submitIncidentStatusUpdate(
 export async function assignResponderToIncident(
   responderPublicCode: string,
   incidentPublicId: string,
+  actorId?: string,
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase) return { ok: false, reason: "Supabase is not configured." };
+  if (!supabase)
+    return { ok: true, reason: "Demo assignment completed locally." };
 
-  const [
-    { data: responder, error: responderError },
-    { data: incident, error: incidentError },
-  ] = await Promise.all([
-    supabase
-      .from("responders")
-      .select("id, name, agency_unit")
-      .eq("public_code", responderPublicCode)
-      .single(),
-    supabase
-      .from("incidents")
-      .select("id, public_id, status, assigned_responder_name")
-      .eq("public_id", incidentPublicId)
-      .single(),
-  ]);
+  const rpc = await supabase.rpc("assign_nodeguard_responder", {
+    p_responder_code: responderPublicCode,
+    p_incident_public_id: incidentPublicId,
+    p_actor_id: actorId ?? null,
+  });
+  if (!rpc.error) return { ok: true };
+  return {
+    ok: false,
+    reason: rpc.error.message.includes("assign_nodeguard_responder")
+      ? "Atomic responder assignment is unavailable. Apply migration 0005 before dispatching."
+      : rpc.error.message,
+  };
+}
 
-  if (responderError || !responder)
-    return {
-      ok: false,
-      reason: responderError?.message ?? "Responder not found.",
-    };
-  if (incidentError || !incident)
-    return {
-      ok: false,
-      reason: incidentError?.message ?? "Incident not found.",
-    };
+export async function assignResourceToIncident(
+  resourcePublicCode: string,
+  incidentPublicId: string,
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase)
+    return { ok: true, reason: "Demo resource assignment completed locally." };
 
-  if (["resolved", "closed", "false_alert"].includes(incident.status)) {
-    return {
-      ok: false,
-      reason: `${incident.public_id} is already ${mapStatus(incident.status as IncidentRow["status"])} and cannot be reassigned.`,
-    };
+  const { error } = await supabase.rpc("assign_nodeguard_resource", {
+    p_resource_code: resourcePublicCode,
+    p_incident_public_id: incidentPublicId,
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true };
+}
+
+export async function validateIncident(
+  incidentPublicId: string,
+  validationStatus: ValidationStatus,
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase)
+    return { ok: true, reason: "Demo alert validation completed locally." };
+
+  const dbStatus =
+    validationStatus === "Confirmed"
+      ? "confirmed"
+      : validationStatus === "False Alarm"
+        ? "false_alarm"
+        : "pending_review";
+  const { error } = await supabase.rpc("validate_nodeguard_incident", {
+    p_incident_public_id: incidentPublicId,
+    p_validation_status: dbStatus,
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true };
+}
+
+export async function updateDeviceStatus(
+  deviceId: string,
+  status: "online" | "maintenance" | "offline",
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase)
+    return { ok: true, reason: "Demo device status updated locally." };
+
+  const { data, error } = await supabase
+    .from("device_locations")
+    .update({ status })
+    .eq("device_id", deviceId)
+    .select("device_id")
+    .maybeSingle();
+  if (error || !data) {
+    return { ok: false, reason: error?.message ?? "Device not found." };
   }
-
-  if (incident.assigned_responder_name === responder.name) {
-    return {
-      ok: true,
-      reason: `${responder.name} is already assigned to ${incident.public_id}.`,
-    };
+  if (actorId) {
+    await supabase.from("audit_logs").insert({
+      actor_profile_id: actorId,
+      action: "update_device_status",
+      entity_type: "device",
+      entity_id: deviceId,
+      details: { status },
+    });
   }
-
-  const now = new Date().toISOString();
-  const { error: incidentUpdateError } = await supabase
-    .from("incidents")
-    .update({
-      assigned_responder_name: responder.name,
-      assigned_unit: responder.agency_unit,
-      status: "assigned",
-    })
-    .eq("id", incident.id);
-
-  if (incidentUpdateError)
-    return { ok: false, reason: incidentUpdateError.message };
-
-  const { error: responderUpdateError } = await supabase
-    .from("responders")
-    .update({
-      availability: "dispatched",
-      current_assignment: incident.public_id,
-      last_status_update: now,
-    })
-    .eq("id", responder.id);
-
-  if (responderUpdateError)
-    return { ok: false, reason: responderUpdateError.message };
-
-  const { error: assignmentError } = await supabase
-    .from("incident_assignments")
-    .insert({
-      incident_id: incident.id,
-      responder_id: responder.id,
-      assigned_unit: responder.agency_unit,
-      notes: `Assigned from NodeGuard dashboard to ${responder.name}.`,
-    });
-
-  if (assignmentError) return { ok: false, reason: assignmentError.message };
-
-  const { error: notificationError } = await supabase
-    .from("notifications")
-    .insert({
-      responder_id: responder.id,
-      incident_id: incident.id,
-      type: "assignment",
-      title: `New incident assigned: ${incident.public_id}`,
-      message: `${incident.public_id} assigned to ${responder.name}.`,
-      is_read: false,
-    });
-
-  if (notificationError)
-    return { ok: false, reason: notificationError.message };
-
   return { ok: true };
 }
 
@@ -295,28 +381,61 @@ export async function setDeviceBuzzer(
   deviceId: string,
   active: boolean,
   source: "dashboard" | "personnel_app" = "dashboard",
+  actorId?: string,
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase) return { ok: false, reason: "Supabase is not configured." };
+  if (!supabase)
+    return { ok: true, reason: "Demo buzzer command completed locally." };
 
   const { error } = await supabase.rpc("set_device_buzzer", {
     p_device_id: deviceId,
     p_active: active,
     p_source: source,
+    p_requested_by: actorId ?? null,
   });
 
   return error ? { ok: false, reason: error.message } : { ok: true };
 }
 
-function mapIncidentRow(row: IncidentRow): Incident {
-  const fieldNotes = (row.incident_status_updates ?? [])
+async function mapIncidentRow(
+  row: IncidentRow,
+  supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
+): Promise<Incident> {
+  const statusUpdates = (row.incident_status_updates ?? [])
+    .toSorted((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const fieldNotes = statusUpdates
     .filter((update) => update.remarks && update.remarks.trim().length > 0)
     .toSorted((a, b) =>
       String(b.created_at).localeCompare(String(a.created_at)),
     );
+  const responseUpdate = statusUpdates.find((update) =>
+    ["on_scene", "responding"].includes(update.status),
+  );
+  const finalUpdate = statusUpdates.findLast((update) =>
+    ["resolved", "closed", "false_alert"].includes(update.status),
+  );
+  const responseMinutes = responseUpdate
+    ? Math.max(
+        0,
+        Math.round(
+          (new Date(responseUpdate.created_at).getTime() - new Date(row.occurred_at).getTime()) /
+            60_000,
+        ),
+      )
+    : undefined;
   const deviceLocation = Array.isArray(row.device_locations)
     ? row.device_locations[0]
     : row.device_locations;
+  const voiceContext = Array.isArray(row.voice_contexts)
+    ? row.voice_contexts[0]
+    : row.voice_contexts;
+  let voiceUrl: string | undefined;
+  if (voiceContext?.storage_path) {
+    const { data } = await supabase.storage
+      .from("voice-contexts")
+      .createSignedUrl(voiceContext.storage_path, 900);
+    voiceUrl = data?.signedUrl;
+  }
 
   return {
     id: row.public_id,
@@ -330,6 +449,9 @@ function mapIncidentRow(row: IncidentRow): Incident {
       ? "Voice clip attached"
       : "No voice context",
     callerContext: row.caller_context,
+    approximateAddress: row.approximate_address,
+    nodeLocation: row.node_location,
+    coordinates: row.coordinates,
     assignedResponder: row.assigned_responder_name ?? "Unassigned",
     priority:
       row.priority === "critical"
@@ -351,7 +473,39 @@ function mapIncidentRow(row: IncidentRow): Incident {
       remarks: note.remarks ?? "",
       createdAt: formatTimestamp(note.created_at),
     })),
+    resolvedAt: finalUpdate ? formatTimestamp(finalUpdate.created_at) : undefined,
+    responseTimeMinutes: Number.isFinite(responseMinutes) ? responseMinutes : undefined,
+    validationStatus: mapValidationStatus(row.validation_status, row.status),
+    voiceTranscript: voiceContext?.transcript ?? undefined,
+    voiceUrl,
   };
+}
+
+function mapValidationStatus(
+  value: IncidentRow["validation_status"],
+  status: IncidentRow["status"],
+): ValidationStatus {
+  if (value === "confirmed") return "Confirmed";
+  if (value === "false_alarm" || status === "false_alert") return "False Alarm";
+  if (value === "pending_review" || status === "new_alert") return "Pending Review";
+  return "Confirmed";
+}
+
+function mapResourceStatus(
+  status: ResourceRow["status"],
+): ResponseResource["status"] {
+  switch (status) {
+    case "available":
+      return "Available";
+    case "dispatched":
+      return "Dispatched";
+    case "under_maintenance":
+      return "Under Maintenance";
+    case "unavailable":
+      return "Unavailable";
+    case "reserved":
+      return "Reserved";
+  }
 }
 
 function mapCategory(category: IncidentRow["category"]): Incident["category"] {

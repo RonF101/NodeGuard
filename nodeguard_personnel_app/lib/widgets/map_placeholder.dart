@@ -38,11 +38,19 @@ class MapPlaceholder extends StatelessWidget {
               ...List.generate(mockLocations.length, (index) {
                 final location = mockLocations[index];
                 final active = incident?.deviceId == location.deviceId;
+                final urgent = active &&
+                    incident != null &&
+                    [
+                      IncidentStatus.onScene,
+                      IncidentStatus.responding,
+                      IncidentStatus.needBackup,
+                    ].contains(incident!.status);
                 final pos = positions[index];
                 return Positioned(
                   left: (pos.dx * width).clamp(8, width - 92).toDouble(),
                   top: (pos.dy * height).clamp(8, height - 58).toDouble(),
-                  child: _MapMarker(label: location.name, active: active),
+                  child: _MapMarker(
+                      label: location.name, active: active, urgent: urgent),
                 );
               }),
               Positioned(
@@ -82,10 +90,12 @@ class MapPlaceholder extends StatelessWidget {
 }
 
 class _MapMarker extends StatelessWidget {
-  const _MapMarker({required this.label, required this.active});
+  const _MapMarker(
+      {required this.label, required this.active, required this.urgent});
 
   final String label;
   final bool active;
+  final bool urgent;
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +104,11 @@ class _MapMarker extends StatelessWidget {
       children: [
         Icon(
           Icons.location_on,
-          color: active ? AppColors.alertRed : AppColors.mediumGreen,
+          color: urgent
+              ? AppColors.goRed
+              : active
+                  ? AppColors.setBlue
+                  : AppColors.successGreen,
           size: active ? 36 : 28,
         ),
         Container(
@@ -104,7 +118,11 @@ class _MapMarker extends StatelessWidget {
             color: Colors.white,
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-                color: active ? AppColors.alertRed : AppColors.border),
+                color: urgent
+                    ? AppColors.goRed
+                    : active
+                        ? AppColors.setBlue
+                        : AppColors.border),
           ),
           child: Text(
             label,

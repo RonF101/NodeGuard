@@ -236,8 +236,10 @@ export function IncidentTable({
                     size="small"
                     variant="outlined"
                     startIcon={<VolumeUpIcon />}
+                    onClick={() => onView?.(incident)}
+                    disabled={incident.voiceContext === "No voice context"}
                   >
-                    Clip
+                    Context
                   </Button>
                 </TableCell>
               )}

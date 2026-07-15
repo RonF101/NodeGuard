@@ -61,11 +61,11 @@ extension IncidentPriorityLabel on IncidentPriority {
       case IncidentPriority.critical:
         return AppColors.alertRed;
       case IncidentPriority.high:
-        return AppColors.orange;
+        return AppColors.setBlueDark;
       case IncidentPriority.medium:
-        return AppColors.warningAmber;
+        return AppColors.setBlue;
       case IncidentPriority.low:
-        return AppColors.mediumGreen;
+        return AppColors.mutedText;
     }
   }
 }
@@ -97,15 +97,15 @@ extension IncidentStatusLabel on IncidentStatus {
   Color get color {
     switch (this) {
       case IncidentStatus.newAlert:
-        return AppColors.alertRed;
+        return AppColors.setBlueDark;
       case IncidentStatus.assigned:
-        return AppColors.deepGreen;
+        return AppColors.setBlueDark;
       case IncidentStatus.enRoute:
-        return AppColors.orange;
+        return AppColors.setBlue;
       case IncidentStatus.onScene:
-        return AppColors.warningAmber;
+        return AppColors.goRed;
       case IncidentStatus.responding:
-        return AppColors.alertRed;
+        return AppColors.goRed;
       case IncidentStatus.resolved:
         return AppColors.successGreen;
       case IncidentStatus.closed:
@@ -138,6 +138,8 @@ class Incident {
     required this.notes,
     required this.buzzerActive,
     required this.buzzerUpdatedAt,
+    this.voiceUrl,
+    this.voiceTranscript,
   });
 
   final String id;
@@ -158,6 +160,8 @@ class Incident {
   final List<String> notes;
   final bool buzzerActive;
   final DateTime? buzzerUpdatedAt;
+  final String? voiceUrl;
+  final String? voiceTranscript;
 
   bool get isCompleted =>
       status == IncidentStatus.resolved ||
@@ -189,6 +193,14 @@ class Incident {
       notes: notes ?? this.notes,
       buzzerActive: buzzerActive ?? this.buzzerActive,
       buzzerUpdatedAt: buzzerUpdatedAt ?? this.buzzerUpdatedAt,
+      voiceUrl: voiceUrl,
+      voiceTranscript: voiceTranscript,
     );
   }
 }
+
+typedef IncidentStatusUpdateCallback = Future<bool> Function(
+  String id,
+  IncidentStatus status,
+  String remarks,
+);

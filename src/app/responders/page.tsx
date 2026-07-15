@@ -8,6 +8,7 @@ import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
 import ReportProblemIcon from "@mui/icons-material/ReportProblem";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
+import Alert from "@mui/material/Alert";
 import Grid from "@mui/material/Grid";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
@@ -24,11 +25,17 @@ import {
   RespondersResourcesFilters
 } from "@/components/responders/RespondersResourcesFilters";
 import { incidents } from "@/data/incidents";
-import { fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
+import {
+  fetchIncidents,
+  fetchResponders,
+  fetchResources,
+} from "@/lib/nodeguardRepository";
 import { responders as responderSeed } from "@/data/responders";
 import { resources as resourceSeed } from "@/data/resources";
 import { mdrrmoPalette } from "@/theme/theme";
 import { Responder, ResponseResource } from "@/types";
+import { authorizedFetch } from "@/lib/auth";
+import { isSupabaseConfigured } from "@/lib/supabaseClient";
 
 const initialFilters: ResponderFilters = {
   agency: "All",
@@ -38,25 +45,32 @@ const initialFilters: ResponderFilters = {
 };
 
 export default function RespondersPage() {
-  const [responders, setResponders] = useState<Responder[]>(responderSeed);
-  const [resources, setResources] = useState<ResponseResource[]>(resourceSeed);
+  const [responders, setResponders] = useState<Responder[]>(isSupabaseConfigured() ? [] : responderSeed);
+  const [resources, setResources] = useState<ResponseResource[]>(isSupabaseConfigured() ? [] : resourceSeed);
   const [filters, setFilters] = useState<ResponderFilters>(initialFilters);
   const [assignmentTarget, setAssignmentTarget] = useState<AssignmentTarget | null>(null);
   const [selectedIncident, setSelectedIncident] = useState("");
-  const [selectedTeam, setSelectedTeam] = useState("");
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("Assignment updated successfully.");
-  const [incidentItems, setIncidentItems] = useState(incidents);
+  const [incidentItems, setIncidentItems] = useState(isSupabaseConfigured() ? [] : incidents);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    const loadOperationsData = () => Promise.all([fetchResponders(), fetchIncidents()]).then(([nextResponders, nextIncidents]) => {
-      if (!mounted) return;
-      setResponders(nextResponders);
-      setIncidentItems(nextIncidents);
-    });
-    loadOperationsData();
+    const loadOperationsData = () => Promise.all([fetchResponders(), fetchIncidents(), fetchResources()])
+      .then(([nextResponders, nextIncidents, nextResources]) => {
+        if (!mounted) return;
+        setResponders(nextResponders);
+        setIncidentItems(nextIncidents);
+        setResources(nextResources);
+        setLoadError(null);
+      })
+      .catch((error: unknown) => {
+        if (!mounted) return;
+        setLoadError(error instanceof Error ? error.message : "Unable to load responders and resources.");
+      });
+    void loadOperationsData();
     window.addEventListener(NODEGUARD_REALTIME_EVENT, loadOperationsData);
     return () => {
       mounted = false;
@@ -67,14 +81,6 @@ export default function RespondersPage() {
   const activeIncidents = useMemo(
     () => incidentItems.filter((incident) => !["Resolved", "Closed", "False Alert"].includes(incident.status)),
     [incidentItems]
-  );
-
-  const assignableTeams = useMemo(
-    () =>
-      responders.filter((responder) =>
-        ["Available", "En Route", "On Scene", "Responding", "Busy"].includes(responder.availability)
-      ),
-    [responders]
   );
 
   const agencies = useMemo(
@@ -116,8 +122,7 @@ export default function RespondersPage() {
 
   const openAssignment = (target: AssignmentTarget) => {
     setAssignmentTarget(target);
-    setSelectedIncident(target.kind === "responder" ? (activeIncidents[0]?.id ?? "") : "");
-    setSelectedTeam(target.kind === "resource" ? (assignableTeams[0]?.id ?? "") : "");
+    setSelectedIncident(activeIncidents[0]?.id ?? "");
   };
 
   const handleConfirmAssignment = async () => {
@@ -126,7 +131,7 @@ export default function RespondersPage() {
     if (assignmentTarget.kind === "responder") {
       if (!selectedIncident) return;
       setIsAssigning(true);
-      const response = await fetch("/api/assign-responder", {
+      const response = await authorizedFetch("/api/assign-responder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ responderId: assignmentTarget.id, incidentId: selectedIncident })
@@ -162,15 +167,30 @@ export default function RespondersPage() {
         )
       );
     } else {
-      if (!selectedTeam) return;
-      const team = responders.find((responder) => responder.id === selectedTeam);
+      if (!selectedIncident) return;
+      setIsAssigning(true);
+      const response = await authorizedFetch("/api/assign-resource", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resourceId: assignmentTarget.id,
+          incidentId: selectedIncident,
+        }),
+      });
+      const result = (await response.json()) as { ok: boolean; reason?: string };
+      setIsAssigning(false);
+      if (!result.ok) {
+        setSnackbarMessage(result.reason ?? "Resource assignment failed.");
+        setSnackbarOpen(true);
+        return;
+      }
       setResources((current) =>
         current.map((resource) =>
           resource.id === assignmentTarget.id
             ? {
                 ...resource,
                 status: "Dispatched",
-                assignedIncident: team?.name ?? selectedTeam,
+                assignedIncident: selectedIncident,
                 lastUpdated: "Just now"
               }
             : resource
@@ -190,6 +210,7 @@ export default function RespondersPage() {
         title="Responders & Resources"
         subtitle="Monitor personnel availability and response resources for emergency dispatch support."
       />
+      {loadError && <Alert severity="error" sx={{ mb: 3 }}>{loadError}</Alert>}
       <Stack spacing={3}>
         <Grid container spacing={3}>
           <Grid size={{ xs: 12, sm: 6, lg: 2.4 }}>
@@ -207,7 +228,7 @@ export default function RespondersPage() {
               value={activeResponders}
               helper="Busy, en route, on scene, or responding"
               icon={<ReportProblemIcon />}
-              tone={mdrrmoPalette.warningAmber}
+              tone={mdrrmoPalette.setBlue}
             />
           </Grid>
           <Grid size={{ xs: 12, sm: 6, lg: 2.4 }}>
@@ -234,7 +255,7 @@ export default function RespondersPage() {
               value={unavailableResources}
               helper="Maintenance or unavailable"
               icon={<AirlineSeatFlatIcon />}
-              tone={mdrrmoPalette.alertRed}
+              tone={mdrrmoPalette.muted}
             />
           </Grid>
         </Grid>
@@ -279,13 +300,11 @@ export default function RespondersPage() {
       </Stack>
 
       <ResourceAssignmentDialog
+        key={assignmentTarget?.id ?? "closed"}
         target={assignmentTarget}
         activeIncidents={activeIncidents}
-        availableTeams={assignableTeams}
         selectedIncident={selectedIncident}
-        selectedTeam={selectedTeam}
         onSelectedIncident={setSelectedIncident}
-        onSelectedTeam={setSelectedTeam}
         onClose={() => setAssignmentTarget(null)}
         onConfirm={handleConfirmAssignment}
         isConfirming={isAssigning}

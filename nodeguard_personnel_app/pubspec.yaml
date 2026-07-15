@@ -1,5 +1,5 @@
 name: nodeguard_personnel_app
-description: NodeGuard Personnel mobile prototype for La Trinidad MDRRMO responders.
+description: NodeGuard Personnel application for La Trinidad MDRRMO responders.
 publish_to: "none"
 version: 0.1.0+1
 
@@ -10,7 +10,10 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  connectivity_plus: ^7.3.0
+  shared_preferences: ^2.5.5
   supabase_flutter: ^2.15.4
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -19,3 +22,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/mdrrmc-logo.png

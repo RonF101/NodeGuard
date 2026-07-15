@@ -1,26 +1,36 @@
 import { createTheme } from "@mui/material/styles";
 
 export const mdrrmoPalette = {
-  orange: "#F47F35",
-  cream: "#F7D6C2",
-  green: "#3E7058",
-  darkGreen: "#244D3A",
+  readyWhite: "#FFFFFF",
+  setBlue: "#155EEF",
+  setBlueDark: "#0B3A67",
+  setBlueSoft: "#EAF2FF",
+  goRed: "#C62828",
+  goRedSoft: "#FDECEC",
+  navy: "#0B1F33",
   white: "#FFFFFF",
-  softGray: "#F5F6F7",
-  alertRed: "#D32F2F",
-  warningAmber: "#F9A825",
-  successGreen: "#2E7D32",
-  slate: "#23342C"
+  softGray: "#F4F7FA",
+  border: "#D9E2EC",
+  muted: "#52606D",
+  successGreen: "#1F7A4D",
+  warningAmber: "#946200",
+  slate: "#172B3A",
+  // Compatibility aliases while legacy feature views migrate to the shared system.
+  orange: "#155EEF",
+  cream: "#EAF2FF",
+  green: "#155EEF",
+  darkGreen: "#0B3A67",
+  alertRed: "#C62828"
 };
 
 export const theme = createTheme({
   palette: {
     primary: {
-      main: mdrrmoPalette.orange,
+      main: mdrrmoPalette.setBlue,
       contrastText: mdrrmoPalette.white
     },
     secondary: {
-      main: mdrrmoPalette.darkGreen,
+      main: mdrrmoPalette.setBlueDark,
       contrastText: mdrrmoPalette.white
     },
     success: {
@@ -58,8 +68,8 @@ export const theme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          border: "1px solid rgba(36, 77, 58, 0.08)",
-          boxShadow: "0 10px 24px rgba(36, 77, 58, 0.08)"
+          border: `1px solid ${mdrrmoPalette.border}`,
+          boxShadow: "0 8px 22px rgba(11, 31, 51, 0.07)"
         }
       }
     },
@@ -69,7 +79,8 @@ export const theme = createTheme({
       },
       styleOverrides: {
         root: {
-          borderRadius: 8
+          borderRadius: 8,
+          minHeight: 44
         }
       }
     },

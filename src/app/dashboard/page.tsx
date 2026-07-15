@@ -1,3 +1,6 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
 import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
 import CrisisAlertIcon from "@mui/icons-material/CrisisAlert";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
@@ -17,11 +20,44 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
 import { mdrrmoPalette } from "@/theme/theme";
+import { incidents as incidentSeed } from "@/data/incidents";
+import { responders as responderSeed } from "@/data/responders";
+import { Incident, Responder } from "@/types";
+import { NODEGUARD_REALTIME_EVENT } from "@/components/RealtimeRefresh";
+import { isSupabaseConfigured } from "@/lib/supabaseClient";
 
-export const dynamic = "force-dynamic";
+export default function DashboardPage() {
+  const [incidents, setIncidents] = useState<Incident[]>(
+    isSupabaseConfigured() ? [] : incidentSeed,
+  );
+  const [responders, setResponders] = useState<Responder[]>(
+    isSupabaseConfigured() ? [] : responderSeed,
+  );
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-export default async function DashboardPage() {
-  const [incidents, responders] = await Promise.all([fetchIncidents(), fetchResponders()]);
+  const loadOperations = useCallback(async () => {
+    try {
+      const [nextIncidents, nextResponders] = await Promise.all([
+        fetchIncidents(),
+        fetchResponders(),
+      ]);
+      setIncidents(nextIncidents);
+      setResponders(nextResponders);
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to load operations data.");
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void loadOperations(), 0);
+    window.addEventListener(NODEGUARD_REALTIME_EVENT, loadOperations);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.removeEventListener(NODEGUARD_REALTIME_EVENT, loadOperations);
+    };
+  }, [loadOperations]);
+
   const activeIncidents = incidents.filter((incident) => !["Resolved", "Closed", "False Alert"].includes(incident.status)).length;
   const newAlerts = incidents.filter((incident) => incident.status === "New Alert").length;
   const respondersActive = responders.filter((responder) => ["En Route", "On Scene", "Responding", "Busy"].includes(responder.availability)).length;
@@ -43,13 +79,14 @@ export default async function DashboardPage() {
       <Alert severity="info" sx={{ mb: 3, borderColor: mdrrmoPalette.cream }}>
         Private NodeGuard workspace for authorized La Trinidad MDRRMO personnel.
       </Alert>
+      {loadError && <Alert severity="error" sx={{ mb: 3 }}>{loadError}</Alert>}
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <StatCard
             label="Active Incidents"
             value={activeIncidents}
             helper="Open incidents requiring monitoring"
-            tone={mdrrmoPalette.alertRed}
+            tone={mdrrmoPalette.setBlue}
             icon={<CrisisAlertIcon />}
           />
         </Grid>
@@ -58,7 +95,7 @@ export default async function DashboardPage() {
             label="New Alerts"
             value={newAlerts}
             helper="Newly activated nodes needing triage"
-            tone={mdrrmoPalette.warningAmber}
+            tone={mdrrmoPalette.setBlueDark}
             icon={<FactCheckIcon />}
           />
         </Grid>

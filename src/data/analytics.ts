@@ -468,8 +468,11 @@ export function getRecommendation(row: Pick<NodeAnalyticsRow, "riskLevel" | "mos
   return "Continue routine monitoring and keep response contacts updated.";
 }
 
-export function buildNodeAnalytics(incidents: AnalyticsIncident[]): NodeAnalyticsRow[] {
-  return nodeOptions.map((node) => {
+export function buildNodeAnalytics(
+  incidents: AnalyticsIncident[],
+  nodes: Array<{ deviceId: string; location: string }> = nodeOptions,
+): NodeAnalyticsRow[] {
+  return nodes.map((node) => {
     const nodeIncidents = incidents.filter((incident) => incident.deviceId === node.deviceId);
     const categories = countCategories(nodeIncidents);
     const verified = nodeIncidents.filter((incident) => incident.validationStatus === "Confirmed").length;

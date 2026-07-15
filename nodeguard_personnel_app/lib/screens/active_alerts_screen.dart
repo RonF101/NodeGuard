@@ -13,8 +13,7 @@ class ActiveAlertsScreen extends StatelessWidget {
   });
 
   final List<Incident> alerts;
-  final void Function(String id, IncidentStatus status, String remarks)
-      onIncidentStatusChanged;
+  final IncidentStatusUpdateCallback onIncidentStatusChanged;
 
   @override
   Widget build(BuildContext context) {

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../data/mock_locations.dart';
 import '../models/incident.dart';
 import '../theme/app_colors.dart';
+import '../services/operational_mode_service.dart';
 import '../widgets/map_placeholder.dart';
 import '../widgets/status_chip.dart';
 
@@ -16,8 +18,7 @@ class MapScreen extends StatefulWidget {
 
   final List<Incident> incidents;
   final Incident? selectedIncident;
-  final void Function(String id, IncidentStatus status, String remarks)
-      onIncidentStatusChanged;
+  final IncidentStatusUpdateCallback onIncidentStatusChanged;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -41,18 +42,39 @@ class _MapScreenState extends State<MapScreen> {
           if (incident != null)
             _IncidentLocationCard(
               incident: incident,
-              onOpenRoute: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text(
-                          'Route opening placeholder - map API not connected yet.')),
+              onOpenRoute: () async {
+                final mode = OperationalModeService.instance;
+                if (!mode.online || mode.lowBandwidth) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(mode.online
+                          ? 'External routing is deferred in Low-Bandwidth Mode.'
+                          : 'Offline · Local Sync. External routing requires a connection.'),
+                    ),
+                  );
+                  return;
+                }
+                final uri = Uri.parse(
+                  'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent(incident.coordinates)}',
                 );
+                final opened = await launchUrl(
+                  uri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!opened && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'No compatible map application is available.')),
+                  );
+                }
               },
-              onMarkEnRoute: () {
-                widget.onIncidentStatusChanged(
+              onMarkEnRoute: () async {
+                final saved = await widget.onIncidentStatusChanged(
                     incident.id,
                     IncidentStatus.enRoute,
                     'Responder marked en route from map screen.');
+                if (!saved || !context.mounted) return;
                 setState(() => _selectedIncident =
                     incident.copyWith(status: IncidentStatus.enRoute));
                 ScaffoldMessenger.of(context).showSnackBar(

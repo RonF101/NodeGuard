@@ -7,9 +7,9 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.orange,
-        primary: AppColors.orange,
-        secondary: AppColors.deepGreen,
+        seedColor: AppColors.setBlue,
+        primary: AppColors.setBlue,
+        secondary: AppColors.setBlueDark,
         surface: Colors.white,
         error: AppColors.alertRed,
       ),
@@ -32,20 +32,33 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: AppColors.orange,
+          backgroundColor: AppColors.setBlue,
           foregroundColor: Colors.white,
-          minimumSize: const Size.fromHeight(48),
+          minimumSize: const Size(48, 48),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           textStyle: const TextStyle(fontWeight: FontWeight.w800),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.deepGreen,
-          minimumSize: const Size.fromHeight(46),
-          side: const BorderSide(color: AppColors.mediumGreen),
+          foregroundColor: AppColors.setBlueDark,
+          minimumSize: const Size(48, 48),
+          side: const BorderSide(color: AppColors.setBlue),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           textStyle: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.setBlueDark,
+          minimumSize: const Size(48, 48),
+          textStyle: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          foregroundColor: AppColors.setBlueDark,
+          minimumSize: const Size(48, 48),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -58,9 +71,10 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.orange, width: 2),
+          borderSide: const BorderSide(color: AppColors.setBlue, width: 2),
         ),
       ),
+      materialTapTargetSize: MaterialTapTargetSize.padded,
     );
   }
 }

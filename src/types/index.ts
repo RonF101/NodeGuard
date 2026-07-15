@@ -48,6 +48,9 @@ export interface Incident {
   triggerMethod: "Button" | "Voice";
   voiceContext: string;
   callerContext: string;
+  approximateAddress?: string;
+  nodeLocation?: string;
+  coordinates?: string;
   assignedResponder: string;
   priority: "Critical" | "High" | "Moderate";
   buzzerActive?: boolean;
@@ -56,6 +59,11 @@ export interface Incident {
   latestFieldNote?: string;
   latestFieldNoteAt?: string;
   fieldNotes?: FieldNote[];
+  resolvedAt?: string;
+  responseTimeMinutes?: number;
+  validationStatus?: ValidationStatus;
+  voiceTranscript?: string;
+  voiceUrl?: string;
 }
 
 export interface FieldNote {
@@ -110,7 +118,10 @@ export interface DeviceNode {
     x: number;
     y: number;
   };
-  status: "Online" | "Maintenance";
+  geoCoordinates?: string;
+  approximateAddress?: string;
+  zone?: string;
+  status: "Online" | "Maintenance" | "Offline";
   assignedIncidentId?: string;
 }
 

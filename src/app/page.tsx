@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import LockIcon from "@mui/icons-material/Lock";
 import MailIcon from "@mui/icons-material/Mail";
@@ -20,17 +20,28 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { BrandLogo } from "@/components/BrandLogo";
-import { getSupabaseClient } from "@/lib/supabaseClient";
+import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabaseClient";
 import { mdrrmoPalette } from "@/theme/theme";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("personnel@ltdrrmo.local");
-  const [password, setPassword] = useState("password");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleLogin = async () => {
+  const configured = isSupabaseConfigured();
+
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (data.session) router.replace("/dashboard");
+    });
+  }, [router]);
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setError(null);
     setIsSubmitting(true);
     const supabase = getSupabaseClient();
@@ -45,6 +56,20 @@ export default function LoginPage() {
 
     if (authError) {
       setError(authError.message);
+      return;
+    }
+
+    const user = (await supabase.auth.getUser()).data.user;
+    const { data: profile } = user
+      ? await supabase
+          .from("profiles")
+          .select("role, is_active")
+          .eq("id", user.id)
+          .maybeSingle()
+      : { data: null };
+    if (!profile || profile.is_active === false) {
+      await supabase.auth.signOut();
+      setError("This account is not linked to an authorized NodeGuard profile.");
       return;
     }
 
@@ -132,12 +157,14 @@ export default function LoginPage() {
               <Typography color="text.secondary" sx={{ mt: 1 }}>
                 La Trinidad MDRRMO Emergency Coordination Dashboard
               </Typography>
-              <Stack spacing={2.2} sx={{ mt: 4 }}>
+              <Stack component="form" onSubmit={handleLogin} spacing={2.2} sx={{ mt: 4 }}>
                 <TextField
                   label="Email"
                   placeholder="personnel@ltdrrmo.local"
                   fullWidth
                   value={email}
+                  required={configured}
+                  autoComplete="username"
                   onChange={(event) => setEmail(event.target.value)}
                   slotProps={{
                     input: {
@@ -154,6 +181,8 @@ export default function LoginPage() {
                   type="password"
                   fullWidth
                   value={password}
+                  required={configured}
+                  autoComplete="current-password"
                   onChange={(event) => setPassword(event.target.value)}
                   slotProps={{
                     input: {
@@ -171,13 +200,19 @@ export default function LoginPage() {
                   ))}
                 </Stack>
                 {error && <Alert severity="error">{error}</Alert>}
-                <Button size="large" onClick={handleLogin} disabled={isSubmitting}>
-                  {isSubmitting ? "Signing In..." : "Login to Dashboard"}
+                <Button size="large" type="submit" disabled={isSubmitting}>
+                  {isSubmitting
+                    ? "Signing In..."
+                    : configured
+                      ? "Login to Dashboard"
+                      : "Enter Demo Dashboard"}
                 </Button>
               </Stack>
               <Divider sx={{ my: 4 }} />
               <Typography variant="body2" color="text.secondary">
-                Supabase Auth is used when environment variables are configured; otherwise this remains a local prototype login.
+                {configured
+                  ? "Use the Supabase account issued by the NodeGuard administrator. Access is checked against the linked personnel profile."
+                  : "Demo mode is active. Configure Supabase environment variables before operational deployment."}
               </Typography>
             </CardContent>
           </Card>

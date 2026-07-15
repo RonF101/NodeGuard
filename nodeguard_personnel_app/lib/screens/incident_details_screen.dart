@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/incident.dart';
 import '../services/nodeguard_repository.dart';
+import '../services/operational_mode_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/incident_card.dart';
 import '../widgets/map_placeholder.dart';
@@ -21,8 +22,7 @@ class IncidentDetailsScreen extends StatefulWidget {
 
   final String incidentId;
   final List<Incident> incidents;
-  final void Function(String id, IncidentStatus status, String remarks)
-      onIncidentStatusChanged;
+  final IncidentStatusUpdateCallback onIncidentStatusChanged;
 
   @override
   State<IncidentDetailsScreen> createState() => _IncidentDetailsScreenState();
@@ -40,7 +40,13 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
       isScrollControlled: true,
       builder: (_) => StatusUpdateSheet(
         incident: _incident,
-        onSubmit: (status, remarks) {
+        onSubmit: (status, remarks) async {
+          final saved = await widget.onIncidentStatusChanged(
+            _incident.id,
+            status,
+            remarks,
+          );
+          if (!saved || !mounted) return false;
           setState(() {
             final updatedNotes = List<String>.of(_incident.notes)
               ..insert(
@@ -50,11 +56,11 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
                       : '${status.label}: $remarks');
             _incident = _incident.copyWith(status: status, notes: updatedNotes);
           });
-          widget.onIncidentStatusChanged(_incident.id, status, remarks);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content: Text('${_incident.id} updated to ${status.label}')),
           );
+          return true;
         },
       ),
     );
@@ -62,13 +68,17 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
 
   Future<void> _toggleBuzzer() async {
     final nextActive = !_incident.buzzerActive;
-    setState(() {
-      _isTogglingBuzzer = true;
-      _incident = _incident.copyWith(
-        buzzerActive: nextActive,
-        buzzerUpdatedAt: DateTime.now(),
+    if (!OperationalModeService.instance.online) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Offline · Local Sync. Buzzer commands require a live connection and are never queued.'),
+        ),
       );
-    });
+      return;
+    }
+    if (!await _confirmBuzzerCommand(nextActive)) return;
+    setState(() => _isTogglingBuzzer = true);
 
     final updated = await _repository.setDeviceBuzzer(
       deviceId: _incident.deviceId,
@@ -76,16 +86,77 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
     );
 
     if (!mounted) return;
-    setState(() => _isTogglingBuzzer = false);
+    setState(() {
+      _isTogglingBuzzer = false;
+      if (updated) {
+        _incident = _incident.copyWith(
+          buzzerActive: nextActive,
+          buzzerUpdatedAt: DateTime.now(),
+        );
+      }
+    });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           updated
               ? 'Node buzzer ${nextActive ? 'activated' : 'deactivated'}.'
-              : 'Buzzer command saved locally only. Check Supabase setup.',
+              : 'Buzzer command failed. Check your assignment and connection.',
         ),
       ),
     );
+  }
+
+  Future<bool> _confirmBuzzerCommand(bool activate) async {
+    var reviewed = false;
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: Text(activate
+                  ? 'Activate urgent node buzzer'
+                  : 'Deactivate node buzzer'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    activate
+                        ? 'This sends an urgent audible command to ${_incident.deviceId}. Confirm the device and field impact.'
+                        : 'This stops the active audible command on ${_incident.deviceId}.',
+                  ),
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: reviewed,
+                    onChanged: (value) =>
+                        setDialogState(() => reviewed = value ?? false),
+                    title: const Text(
+                        'I reviewed the device, incident, and operational impact.'),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ],
+              ),
+              actions: [
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  style: activate
+                      ? FilledButton.styleFrom(backgroundColor: AppColors.goRed)
+                      : null,
+                  onPressed: reviewed
+                      ? () => Navigator.pop(dialogContext, true)
+                      : null,
+                  child: Text(
+                      activate ? 'Activate Buzzer' : 'Confirm Deactivation'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
   }
 
   @override
@@ -106,7 +177,7 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
                       ?.copyWith(fontWeight: FontWeight.w900),
                 ),
               ),
-              Icon(_incident.category.icon, color: AppColors.orange, size: 30),
+              Icon(_incident.category.icon, color: AppColors.setBlue, size: 30),
             ],
           ),
           const SizedBox(height: 8),
@@ -146,7 +217,7 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
                         ? Icons.notifications_active_outlined
                         : Icons.notifications_off_outlined,
                     color: _incident.buzzerActive
-                        ? AppColors.orange
+                        ? AppColors.goRed
                         : AppColors.mutedText,
                   ),
                   const SizedBox(width: 10),
@@ -177,6 +248,9 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
+                  style: !_incident.buzzerActive
+                      ? FilledButton.styleFrom(backgroundColor: AppColors.goRed)
+                      : null,
                   onPressed: _isTogglingBuzzer ? null : _toggleBuzzer,
                   icon: Icon(
                     _incident.buzzerActive

@@ -40,34 +40,40 @@ import {
   analyticsIncidents,
   buildNodeAnalytics,
   countCategories,
-  matchesValidationStatus,
-  nodeOptions
+  matchesValidationStatus
 } from "@/data/analytics";
 import { mdrrmoPalette } from "@/theme/theme";
-import { EmergencyCategory, NodeAnalyticsRow, ValidationStatus } from "@/types";
+import { AnalyticsIncident, EmergencyCategory, NodeAnalyticsRow, ValidationStatus } from "@/types";
 
 type DateRange = "Today" | "This Week" | "This Month";
 type NodeFilter = "All Nodes" | string;
 type StatusFilter = "All" | ValidationStatus | "Resolved";
 
 const categoryColors: Record<EmergencyCategory, string> = {
-  "Medical Emergency": mdrrmoPalette.alertRed,
+  "Medical Emergency": mdrrmoPalette.setBlue,
   "Security/Public Safety": "#1976D2",
   "Fire/Disaster Emergency": "#C65A12"
 };
 
 const riskColors: Record<NodeAnalyticsRow["riskLevel"], { bg: string; color: string }> = {
-  "High Risk": { bg: "#FFEBEE", color: mdrrmoPalette.alertRed },
+  "High Risk": { bg: mdrrmoPalette.setBlueSoft, color: mdrrmoPalette.setBlueDark },
   "Moderate Risk": { bg: "#FFF4D6", color: "#7A5200" },
   "Low Risk": { bg: "#E7F4E8", color: mdrrmoPalette.successGreen },
   "Review Needed": { bg: "#FFE7D6", color: "#9A4A12" }
 };
 
-function isWithinRange(timestamp: string, range: DateRange) {
-  const day = Number(timestamp.slice(8, 10));
-  if (range === "Today") return timestamp.startsWith("2026-07-06");
-  if (range === "This Week") return timestamp.startsWith("2026-07-") && day >= 1 && day <= 6;
-  return timestamp.startsWith("2026-07-") || timestamp.startsWith("2026-06-");
+function isWithinRange(timestamp: string, range: DateRange, referenceDate: Date) {
+  const incidentDate = new Date(timestamp.replace(" ", "T"));
+  if (Number.isNaN(incidentDate.getTime())) return false;
+  const start = new Date(referenceDate);
+  start.setHours(0, 0, 0, 0);
+  if (range === "This Week") {
+    const dayFromMonday = (start.getDay() + 6) % 7;
+    start.setDate(start.getDate() - dayFromMonday);
+  } else if (range === "This Month") {
+    start.setDate(1);
+  }
+  return incidentDate >= start && incidentDate <= referenceDate;
 }
 
 function AnalyticsSummaryCard({
@@ -138,7 +144,8 @@ function AnalyticsFilters({
   onDateRange,
   onCategory,
   onNode,
-  onStatus
+  onStatus,
+  nodeChoices
 }: {
   dateRange: DateRange;
   category: EmergencyCategory | "All";
@@ -148,6 +155,7 @@ function AnalyticsFilters({
   onCategory: (value: EmergencyCategory | "All") => void;
   onNode: (value: NodeFilter) => void;
   onStatus: (value: StatusFilter) => void;
+  nodeChoices: Array<{ deviceId: string; location: string }>;
 }) {
   return (
     <Card>
@@ -187,7 +195,7 @@ function AnalyticsFilters({
             </Typography>
             <Select fullWidth value={node} onChange={(event) => onNode(event.target.value)}>
               <MenuItem value="All Nodes">All Nodes</MenuItem>
-              {nodeOptions.map((option) => (
+              {nodeChoices.map((option) => (
                 <MenuItem key={option.deviceId} value={option.deviceId}>
                   {option.deviceId} - {option.location}
                 </MenuItem>
@@ -291,25 +299,49 @@ function NodeAnalyticsTable({ rows }: { rows: NodeAnalyticsRow[] }) {
   );
 }
 
-export function AnalyticsCharts() {
+export function AnalyticsCharts({
+  incidents = analyticsIncidents,
+  useLatestRecordAsReference = true,
+}: {
+  incidents?: AnalyticsIncident[];
+  useLatestRecordAsReference?: boolean;
+}) {
   const [dateRange, setDateRange] = useState<DateRange>("This Week");
   const [category, setCategory] = useState<EmergencyCategory | "All">("All");
   const [node, setNode] = useState<NodeFilter>("All Nodes");
   const [status, setStatus] = useState<StatusFilter>("All");
 
+  const nodeChoices = useMemo(
+    () => Array.from(
+      new Map(incidents.map((incident) => [incident.deviceId, { deviceId: incident.deviceId, location: incident.nodeLocation }])).values(),
+    ).sort((a, b) => a.deviceId.localeCompare(b.deviceId)),
+    [incidents],
+  );
+  const referenceDate = useMemo(() => {
+    if (!useLatestRecordAsReference) return new Date();
+    const latest = incidents.reduce((maximum, incident) => {
+      const value = new Date(incident.timestamp.replace(" ", "T")).getTime();
+      return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
+    }, 0);
+    return latest ? new Date(latest + 86_399_999) : new Date();
+  }, [incidents, useLatestRecordAsReference]);
+
   const filteredIncidents = useMemo(
     () =>
-      analyticsIncidents
-        .filter((incident) => isWithinRange(incident.timestamp, dateRange))
+      incidents
+        .filter((incident) => isWithinRange(incident.timestamp, dateRange, referenceDate))
         .filter((incident) => category === "All" || incident.category === category)
         .filter((incident) => node === "All Nodes" || incident.deviceId === node)
         .filter((incident) => matchesValidationStatus(incident, status)),
-    [category, dateRange, node, status]
+    [category, dateRange, incidents, node, referenceDate, status]
   );
 
-  const weeklyIncidents = analyticsIncidents.filter((incident) => isWithinRange(incident.timestamp, "This Week"));
-  const nodeRows = useMemo(() => buildNodeAnalytics(filteredIncidents), [filteredIncidents]);
-  const weeklyRows = useMemo(() => buildNodeAnalytics(weeklyIncidents), [weeklyIncidents]);
+  const weeklyIncidents = useMemo(
+    () => incidents.filter((incident) => isWithinRange(incident.timestamp, "This Week", referenceDate)),
+    [incidents, referenceDate],
+  );
+  const nodeRows = useMemo(() => buildNodeAnalytics(filteredIncidents, nodeChoices), [filteredIncidents, nodeChoices]);
+  const weeklyRows = useMemo(() => buildNodeAnalytics(weeklyIncidents, nodeChoices), [weeklyIncidents, nodeChoices]);
   const activeRows = nodeRows.filter((row) => row.totalIncidents > 0);
 
   const categoryCounts = countCategories(filteredIncidents);
@@ -369,7 +401,7 @@ export function AnalyticsCharts() {
             value={falseThisWeek}
             helper="Non-emergency activations"
             icon={<ReportProblemIcon />}
-            tone={mdrrmoPalette.alertRed}
+            tone={mdrrmoPalette.muted}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
@@ -378,13 +410,13 @@ export function AnalyticsCharts() {
             value={pendingThisWeek}
             helper="Needs personnel review"
             icon={<ReviewsIcon />}
-            tone={mdrrmoPalette.warningAmber}
+            tone={mdrrmoPalette.setBlueDark}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
           <AnalyticsSummaryCard
             label="Most Active Node"
-            value={mostActiveNode?.deviceId ?? "N/A"}
+            value={mostActiveNode?.deviceId.replace("LT-NODE-", "Node ") ?? "N/A"}
             helper={mostActiveNode?.location ?? "No active records"}
             icon={<PlaceIcon />}
             tone={mdrrmoPalette.darkGreen}
@@ -396,7 +428,7 @@ export function AnalyticsCharts() {
             value={highestRisk?.location ?? "N/A"}
             helper={highestRisk?.riskLevel ?? "No risk profile"}
             icon={<CrisisAlertIcon />}
-            tone={mdrrmoPalette.alertRed}
+            tone={mdrrmoPalette.setBlueDark}
           />
         </Grid>
       </Grid>
@@ -410,64 +442,66 @@ export function AnalyticsCharts() {
         onCategory={setCategory}
         onNode={setNode}
         onStatus={setStatus}
+        nodeChoices={nodeChoices}
       />
 
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="Incidents by Category">
-            <ResponsiveContainer width="100%" height="82%">
+            <ResponsiveContainer width="100%" height={300}>
               <PieChart>
-                <Pie dataKey="value" data={incidentsByCategory} outerRadius={96} label>
+                <Pie dataKey="value" data={incidentsByCategory} outerRadius={96} label isAnimationActive={false}>
                   {incidentsByCategory.map((entry) => (
                     <Cell key={entry.name} fill={categoryColors[entry.name as EmergencyCategory]} />
                   ))}
                 </Pie>
                 <Tooltip />
+                <Legend />
               </PieChart>
             </ResponsiveContainer>
           </ChartCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="Incidents by Node">
-            <ResponsiveContainer width="100%" height="82%">
+            <ResponsiveContainer width="100%" height={300}>
               <BarChart data={incidentsByNode}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="deviceId" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="incidents" fill={mdrrmoPalette.darkGreen} radius={[6, 6, 0, 0]} />
+                <Bar dataKey="incidents" fill={mdrrmoPalette.darkGreen} radius={[6, 6, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="False vs Confirmed Alarms per Device This Week">
-            <ResponsiveContainer width="100%" height="82%">
+            <ResponsiveContainer width="100%" height={300}>
               <BarChart data={validationByDevice}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="deviceId" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="verified" name="Confirmed" fill={mdrrmoPalette.successGreen} radius={[5, 5, 0, 0]} />
-                <Bar dataKey="falseAlarms" name="False Alarm" fill={mdrrmoPalette.alertRed} radius={[5, 5, 0, 0]} />
-                <Bar dataKey="pending" name="Pending" fill={mdrrmoPalette.warningAmber} radius={[5, 5, 0, 0]} />
+                <Bar dataKey="verified" name="Confirmed" fill={mdrrmoPalette.successGreen} radius={[5, 5, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="falseAlarms" name="False Alarm" fill={mdrrmoPalette.muted} radius={[5, 5, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="pending" name="Pending" fill={mdrrmoPalette.setBlueDark} radius={[5, 5, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="Incident Category Distribution per Node">
-            <ResponsiveContainer width="100%" height="82%">
+            <ResponsiveContainer width="100%" height={300}>
               <BarChart data={categoryByDevice}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="deviceId" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="medical" name="Medical" stackId="a" fill={categoryColors["Medical Emergency"]} />
-                <Bar dataKey="security" name="Security/Public Safety" stackId="a" fill={categoryColors["Security/Public Safety"]} />
-                <Bar dataKey="fireDisaster" name="Fire/Disaster" stackId="a" fill={categoryColors["Fire/Disaster Emergency"]} />
+                <Bar dataKey="medical" name="Medical" stackId="a" fill={categoryColors["Medical Emergency"]} isAnimationActive={false} />
+                <Bar dataKey="security" name="Security/Public Safety" stackId="a" fill={categoryColors["Security/Public Safety"]} isAnimationActive={false} />
+                <Bar dataKey="fireDisaster" name="Fire/Disaster" stackId="a" fill={categoryColors["Fire/Disaster Emergency"]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>

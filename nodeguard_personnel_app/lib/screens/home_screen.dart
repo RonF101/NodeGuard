@@ -17,8 +17,7 @@ class HomeScreen extends StatelessWidget {
 
   final List<Incident> incidents;
   final Responder responder;
-  final void Function(String id, IncidentStatus status, String remarks)
-      onIncidentStatusChanged;
+  final IncidentStatusUpdateCallback onIncidentStatusChanged;
 
   @override
   Widget build(BuildContext context) {

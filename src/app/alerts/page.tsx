@@ -21,6 +21,7 @@ import {
   IncidentStatus,
   Responder,
 } from "@/types";
+import { isSupabaseConfigured } from "@/lib/supabaseClient";
 
 const categories: Array<EmergencyCategory | "All"> = [
   "All",
@@ -45,18 +46,24 @@ export default function LiveAlertsPage() {
   const [category, setCategory] = useState<EmergencyCategory | "All">("All");
   const [status, setStatus] = useState<IncidentStatus | "All">("All");
   const [selected, setSelected] = useState<Incident | null>(null);
-  const [items, setItems] = useState<Incident[]>(incidents);
+  const [items, setItems] = useState<Incident[]>(
+    isSupabaseConfigured() ? [] : incidents,
+  );
   const [responders, setResponders] = useState<Responder[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadIncidents = useCallback(() => {
-    return Promise.all([fetchIncidents(), fetchResponders()]).then(
-      ([nextIncidents, nextResponders]) => {
+    return Promise.all([fetchIncidents(), fetchResponders()])
+      .then(([nextIncidents, nextResponders]) => {
         setItems(nextIncidents);
         setResponders(nextResponders);
-        setIsConnected(nextIncidents !== incidents);
-      },
-    );
+        setIsConnected(isSupabaseConfigured());
+        setLoadError(null);
+      })
+      .catch((error: unknown) => {
+        setLoadError(error instanceof Error ? error.message : "Unable to load live alerts.");
+      });
   }, []);
 
   useEffect(() => {
@@ -92,6 +99,7 @@ export default function LiveAlertsPage() {
           ? "Connected to Supabase incident data."
           : "Using local mock data until Supabase environment variables are configured."}
       </Alert>
+      {loadError && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Grid container spacing={2}>

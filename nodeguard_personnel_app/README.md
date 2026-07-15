@@ -1,62 +1,39 @@
-# NodeGuard Personnel Application
+# NodeGuard Personnel
 
-Standalone Flutter prototype for authorized field responders in the La Trinidad MDRRMO emergency response coordination system.
+Flutter application for authorized field responders coordinated by La Trinidad MDRRMO. It shares incidents, assignments, node state, field notes, and realtime updates with the NodeGuard web dashboard through Supabase.
 
-## Setup
-
-```bash
-flutter pub get
-flutter run
-```
-
-If native Android project files are missing on your machine, run this once from this directory:
-
-```bash
-flutter create --platforms=android .
-```
-
-Then run:
+## Verify locally
 
 ```bash
 flutter pub get
+flutter analyze
+flutter test
 flutter run
 ```
 
-## Supabase Connection
-
-The app connects to the same Supabase project as the web dashboard when dart-defines are supplied.
+Without dart-defines, the app enters clearly labeled demo mode. Live mode requires the same Supabase project as the web dashboard:
 
 ```bash
 flutter run \
   --dart-define=SUPABASE_URL=https://your-project-ref.supabase.co \
-  --dart-define=SUPABASE_ANON_KEY=your-supabase-anon-or-publishable-key
+  --dart-define=SUPABASE_ANON_KEY=your-publishable-or-anon-key
 ```
 
-On PowerShell:
+Live users must have a Supabase Auth account, an active `profiles` row, and a linked `responders.profile_id`. Live backend failures are shown to the user and are never hidden by mock records.
 
-```powershell
-C:\flutter\bin\flutter.bat run `
-  --dart-define=SUPABASE_URL=https://your-project-ref.supabase.co `
-  --dart-define=SUPABASE_ANON_KEY=your-supabase-anon-or-publishable-key
-```
+## Implemented field workflow
 
-When Supabase is configured, the login screen uses Supabase Auth email/password and status updates are written to `incident_status_updates`. When it is not configured, the app stays in offline prototype mode with local mock data.
+- Receive assigned incidents and realtime changes.
+- View category, priority, registered node, address, coordinates, and field-note history.
+- Open coordinates in the device map application.
+- Open private voice context through a short-lived signed URL when available.
+- Update Assigned, En Route, On Scene, Responding, Resolved, or Need Backup status.
+- Require remarks when requesting backup.
+- Control the assigned node buzzer subject to database authorization.
+- Update responder availability with rollback-safe error handling.
 
-If Flutter reports plugin symlink errors on Windows, enable Developer Mode in Windows Settings.
+## Release
 
-## Prototype Scope
+Android uses application ID `ph.gov.latrinidad.nodeguard.personnel`. Copy `android/key.properties.example` to the ignored `android/key.properties`, configure an MDRRMO-controlled upload keystore, then run the `flutter build appbundle --release` command in `../docs/DEPLOYMENT.md`.
 
-- Splash and login screens for authorized responders
-- Bottom navigation: Home, Map, Notifications, History, Profile
-- Assigned incident list and incident detail flow
-- Local mock status updates with remarks
-- Voice context placeholder UI
-- La Trinidad map placeholder with mock nodes
-- Profile availability toggle
-- Mock notifications and completed incident history
-- Optional Supabase backend/Auth integration with local mock fallback
-- No real map API or audio playback integration
-
-## Future Integration
-
-The app is organized around `models/`, `data/`, `screens/`, and `widgets/` so local mock files can later be replaced by Supabase/PostgreSQL API services.
+The iOS bundle identifier is also `ph.gov.latrinidad.nodeguard.personnel`; Apple signing must be configured in Xcode by the deployment owner.

@@ -8,6 +8,8 @@ import '../data/mock_responder.dart';
 import '../models/incident.dart';
 import '../models/responder.dart';
 import '../services/nodeguard_repository.dart';
+import '../services/local_sync_queue.dart';
+import '../services/operational_mode_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/app_colors.dart';
 import 'active_alerts_screen.dart';
@@ -17,6 +19,7 @@ import 'incident_details_screen.dart';
 import 'login_screen.dart';
 import 'map_screen.dart';
 import 'profile_screen.dart';
+import '../widgets/connectivity_banner.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -27,50 +30,114 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   final _repository = const NodeGuardRepository();
+  final _localSyncQueue = const LocalSyncQueue();
+  final _operationalMode = OperationalModeService.instance;
   int _selectedIndex = 0;
-  late List<Incident> _assignedIncidents = List.of(mockIncidents)
-      .where((incident) => incident.assignedResponder == mockResponder.name)
-      .toList();
-  late List<Incident> _allIncidents = List.of(mockIncidents);
+  late List<Incident> _assignedIncidents = SupabaseService.isConfigured
+      ? <Incident>[]
+      : List.of(mockIncidents)
+          .where((incident) => incident.assignedResponder == mockResponder.name)
+          .toList();
+  late List<Incident> _allIncidents =
+      SupabaseService.isConfigured ? <Incident>[] : List.of(mockIncidents);
   Responder _responder = mockResponder;
   bool _isLoading = true;
   bool _isBackendConfigured = SupabaseService.isConfigured;
   bool _hasLoadedSharedData = false;
+  String? _loadError;
   String? _lastAlertedAssignmentId;
   RealtimeChannel? _incidentChannel;
   RealtimeChannel? _responderChannel;
   RealtimeChannel? _deviceChannel;
+  bool _isFlushingQueue = false;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadSharedData());
+    unawaited(_initializeOperationalData());
+  }
+
+  Future<void> _initializeOperationalData() async {
+    await _operationalMode.initialize();
+    _operationalMode.addListener(_handleOperationalModeChanged);
+    if (_operationalMode.online) await _flushLocalQueue();
+    await _loadSharedData();
+  }
+
+  void _handleOperationalModeChanged() {
+    if (mounted) setState(() {});
+    if (_operationalMode.online) unawaited(_flushLocalQueue());
+  }
+
+  Future<void> _flushLocalQueue() async {
+    if (_isFlushingQueue ||
+        !_operationalMode.online ||
+        !_repository.isConfigured) {
+      return;
+    }
+    _isFlushingQueue = true;
+    final pending = await _localSyncQueue.load();
+    if (pending.isEmpty) {
+      _operationalMode.setPendingCount(0);
+      _isFlushingQueue = false;
+      return;
+    }
+    final remaining = <PendingStatusUpdate>[];
+    for (final update in pending) {
+      final saved = await _repository.submitIncidentStatusUpdate(
+        publicId: update.publicId,
+        status: update.status,
+        remarks: update.remarks,
+      );
+      if (!saved) remaining.add(update);
+    }
+    await _localSyncQueue.save(remaining);
+    _operationalMode.setPendingCount(remaining.length);
+    _isFlushingQueue = false;
+    if (!mounted) return;
+    final synced = pending.length - remaining.length;
+    if (synced > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content:
+                Text('$synced local update${synced == 1 ? '' : 's'} synced.')),
+      );
+      unawaited(_loadSharedData());
+    }
   }
 
   Future<void> _loadSharedData() async {
-    final responder = await _repository.fetchResponder();
-    final assignedIncidents = await _repository.fetchIncidents(
-      assignedResponderName: responder.name,
-      fallbackWhenAssignedEmpty: false,
-    );
-    final allIncidents = await _repository.fetchIncidents();
-    if (!mounted) return;
-    final previousAssignment = _responder.currentAssignment;
-    setState(() {
-      _assignedIncidents = assignedIncidents;
-      _allIncidents = allIncidents;
-      _responder = responder;
-      _isBackendConfigured = _repository.isConfigured;
-      _isLoading = false;
-    });
-    if (_hasLoadedSharedData &&
-        responder.currentAssignment != previousAssignment &&
-        responder.currentAssignment != 'No active assignment' &&
-        responder.currentAssignment != _lastAlertedAssignmentId) {
-      _showAssignmentAlert(responder.currentAssignment, assignedIncidents);
+    try {
+      final responder = await _repository.fetchResponder();
+      final assignedIncidents = await _repository.fetchIncidents(
+        assignedResponderName: responder.name,
+      );
+      final allIncidents = await _repository.fetchIncidents();
+      if (!mounted) return;
+      final previousAssignment = _responder.currentAssignment;
+      setState(() {
+        _assignedIncidents = assignedIncidents;
+        _allIncidents = allIncidents;
+        _responder = responder;
+        _isBackendConfigured = _repository.isConfigured;
+        _isLoading = false;
+        _loadError = null;
+      });
+      if (_hasLoadedSharedData &&
+          responder.currentAssignment != previousAssignment &&
+          responder.currentAssignment != 'No active assignment' &&
+          responder.currentAssignment != _lastAlertedAssignmentId) {
+        _showAssignmentAlert(responder.currentAssignment, assignedIncidents);
+      }
+      _hasLoadedSharedData = true;
+      _subscribeToSharedData();
+    } on NodeGuardDataException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError = error.message;
+      });
     }
-    _hasLoadedSharedData = true;
-    _subscribeToSharedData();
   }
 
   void _showAssignmentAlert(String assignmentId, List<Incident> incidents) {
@@ -176,9 +243,46 @@ class _MainShellState extends State<MainShell> {
         .subscribe();
   }
 
-  void _updateIncident(String id, IncidentStatus status, String remarks) {
-    unawaited(_repository.submitIncidentStatusUpdate(
-        publicId: id, status: status, remarks: remarks));
+  Future<bool> _updateIncident(
+      String id, IncidentStatus status, String remarks) async {
+    if (!_operationalMode.online && _repository.isConfigured) {
+      return _queueIncidentUpdate(id, status, remarks);
+    }
+    final updated = await _repository.submitIncidentStatusUpdate(
+        publicId: id, status: status, remarks: remarks);
+    if (!updated) {
+      if (_repository.isConfigured) {
+        return _queueIncidentUpdate(id, status, remarks);
+      }
+      return false;
+    }
+    if (!mounted) return false;
+    _applyLocalIncidentUpdate(id, status, remarks);
+    return true;
+  }
+
+  Future<bool> _queueIncidentUpdate(
+      String id, IncidentStatus status, String remarks) async {
+    final count = await _localSyncQueue.add(PendingStatusUpdate(
+      publicId: id,
+      status: status,
+      remarks: remarks,
+      createdAt: DateTime.now(),
+    ));
+    _operationalMode.setPendingCount(count);
+    if (!mounted) return false;
+    _applyLocalIncidentUpdate(id, status, remarks);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+            'Saved locally · $count update${count == 1 ? '' : 's'} queued for sync.'),
+      ),
+    );
+    return true;
+  }
+
+  void _applyLocalIncidentUpdate(
+      String id, IncidentStatus status, String remarks) {
     setState(() {
       _assignedIncidents =
           _replaceIncidentStatus(_assignedIncidents, id, status, remarks);
@@ -212,16 +316,18 @@ class _MainShellState extends State<MainShell> {
     }).toList();
   }
 
-  void _updateAvailability(AvailabilityStatus availability) {
-    unawaited(_repository.updateAvailability(availability).then((updated) {
-      if (!mounted || updated) return;
+  Future<void> _updateAvailability(AvailabilityStatus availability) async {
+    final updated = await _repository.updateAvailability(availability);
+    if (!mounted) return;
+    if (!updated) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-              'Availability was updated locally only. Supabase is not connected.'),
+              'Availability was not saved. Check the connection and try again.'),
         ),
       );
-    }));
+      return;
+    }
     setState(
         () => _responder = _responder.copyWith(availability: availability));
   }
@@ -237,6 +343,7 @@ class _MainShellState extends State<MainShell> {
 
   @override
   void dispose() {
+    _operationalMode.removeListener(_handleOperationalModeChanged);
     final client = SupabaseService.client;
     if (client != null) {
       if (_incidentChannel != null) {
@@ -281,23 +388,36 @@ class _MainShellState extends State<MainShell> {
     return Scaffold(
       body: Column(
         children: [
-          if (_isLoading || !_isBackendConfigured)
-            SafeArea(
-              bottom: false,
-              child: Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                color:
-                    _isBackendConfigured ? AppColors.cream : AppColors.softGray,
-                child: Text(
-                  _isLoading
-                      ? 'Loading shared NodeGuard data...'
-                      : 'Offline prototype mode: configure Supabase dart-defines to connect live data.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: AppColors.deepGreen, fontWeight: FontWeight.w800),
-                ),
+          const ConnectivityBanner(),
+          if (_isLoading || !_isBackendConfigured || _loadError != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              color: AppColors.readyWhite,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Text(
+                      _loadError ??
+                          (_isLoading
+                              ? 'Loading shared NodeGuard data...'
+                              : 'Demo mode: configure Supabase dart-defines before operational deployment.'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: AppColors.setBlueDark,
+                          fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  if (_loadError != null)
+                    TextButton(
+                      onPressed: () {
+                        setState(() => _isLoading = true);
+                        unawaited(_loadSharedData());
+                      },
+                      child: const Text('Retry'),
+                    ),
+                ],
               ),
             ),
           Expanded(child: pages[_selectedIndex]),
@@ -307,7 +427,7 @@ class _MainShellState extends State<MainShell> {
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) =>
             setState(() => _selectedIndex = index),
-        indicatorColor: AppColors.cream,
+        indicatorColor: AppColors.setBlueSoft,
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.assignment_outlined),

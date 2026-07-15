@@ -15,7 +15,7 @@ NodeGuard Web Dashboard
 ## Setup Checklist
 
 1. Create a Supabase project.
-2. Run `supabase/migrations/0001_nodeguard_core.sql` in the Supabase SQL editor.
+2. Run every file in `supabase/migrations/` in numeric order (`0001` through `0005`) in the Supabase SQL editor.
 3. Create Auth users for dashboard personnel and mobile responders.
 4. Insert matching `profiles` rows using the Auth user IDs.
 5. Link responder users through `responders.profile_id`.
@@ -76,8 +76,10 @@ It creates 27 incidents: 3 each for `New Alert`, `Assigned`, `En Route`, `On Sce
 - The Flutter app only receives the public anon/publishable key.
 - The dashboard may use `SUPABASE_SERVICE_ROLE_KEY` only on the Next.js server.
 - Status changes are recorded in `incident_status_updates` for auditability.
+- Administrative and operational mutations are recorded in `audit_logs`.
+- Linked responder accounts are limited by RLS to authorized incident operations.
 - Incident current status is updated by a database trigger after status-update inserts.
-- Voice context storage paths are separated from incident metadata for future signed URL handling.
+- Voice context files are private and opened using short-lived signed URLs.
 
 ## Tables
 
@@ -88,4 +90,7 @@ It creates 27 incidents: 3 each for `New Alert`, `Assigned`, `En Route`, `On Sce
 - `incident_assignments`: Assignment history.
 - `incident_status_updates`: Responder field updates and remarks.
 - `notifications`: Dashboard-to-responder messages.
-- `voice_contexts`: Voice metadata and future storage paths.
+- `voice_contexts`: Voice metadata, transcript, and private storage path.
+- `response_resources`: Shared vehicles, radios, kits, and response equipment.
+- `resource_assignments`: Resource-to-incident assignment history.
+- `audit_logs`: Security and operational change history.

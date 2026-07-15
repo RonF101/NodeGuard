@@ -4,7 +4,7 @@ import { ThemeRegistry } from "./ThemeRegistry";
 
 export const metadata: Metadata = {
   title: "NodeGuard | La Trinidad MDRRMO",
-  description: "Emergency response coordination dashboard prototype"
+  description: "Emergency response coordination dashboard for La Trinidad MDRRMO"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

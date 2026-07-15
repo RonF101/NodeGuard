@@ -10,10 +10,14 @@ import Stack from "@mui/material/Stack";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import MenuIcon from "@mui/icons-material/Menu";
+import LogoutIcon from "@mui/icons-material/Logout";
 import { mdrrmoPalette } from "@/theme/theme";
 
 type HeaderProps = {
   onMenuClick: () => void;
+  operatorName: string;
+  roleLabel: string;
+  onLogout: () => void;
 };
 
 function formatManilaTime() {
@@ -29,7 +33,12 @@ function subscribeToClock(onStoreChange: () => void) {
   return () => window.clearInterval(interval);
 }
 
-export function Header({ onMenuClick }: HeaderProps) {
+export function Header({
+  onMenuClick,
+  operatorName,
+  roleLabel,
+  onLogout,
+}: HeaderProps) {
   const now = useSyncExternalStore(
     subscribeToClock,
     formatManilaTime,
@@ -41,8 +50,8 @@ export function Header({ onMenuClick }: HeaderProps) {
       position="fixed"
       elevation={0}
       sx={{
-        bgcolor: mdrrmoPalette.orange,
-        borderBottom: `4px solid ${mdrrmoPalette.cream}`,
+        bgcolor: mdrrmoPalette.setBlueDark,
+        borderBottom: `3px solid ${mdrrmoPalette.setBlue}`,
         zIndex: (theme) => theme.zIndex.drawer + 1,
       }}
     >
@@ -97,10 +106,18 @@ export function Header({ onMenuClick }: HeaderProps) {
             {now}
           </Typography>
           <Chip
-            label="Admin"
+            label={roleLabel}
             size="small"
-            sx={{ bgcolor: mdrrmoPalette.darkGreen, color: "white" }}
+            sx={{ bgcolor: "rgba(255,255,255,0.14)", color: "white" }}
           />
+          <IconButton
+            color="inherit"
+            onClick={onLogout}
+            aria-label={`Sign out ${operatorName}`}
+            title={`Sign out ${operatorName}`}
+          >
+            <LogoutIcon />
+          </IconButton>
         </Stack>
       </Toolbar>
     </AppBar>

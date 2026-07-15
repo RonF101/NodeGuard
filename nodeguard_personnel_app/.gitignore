@@ -3,7 +3,6 @@
 .packages
 .flutter-plugins
 .flutter-plugins-dependencies
-pubspec.lock
 
 # Build outputs
 build/
@@ -12,6 +11,11 @@ build/
 .idea/
 .vscode/
 *.iml
+
+# Android release signing secrets
+android/key.properties
+*.jks
+*.keystore
 
 # OS
 .DS_Store

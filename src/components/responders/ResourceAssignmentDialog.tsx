@@ -1,15 +1,20 @@
 "use client";
 
 import Button from "@mui/material/Button";
+import Autocomplete from "@mui/material/Autocomplete";
+import Alert from "@mui/material/Alert";
+import Checkbox from "@mui/material/Checkbox";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import MenuItem from "@mui/material/MenuItem";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { Incident, Responder } from "@/types";
+import { Incident } from "@/types";
+import { useState } from "react";
+import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
 
 export type AssignmentTarget =
   | { kind: "responder"; id: string; name: string }
@@ -18,11 +23,8 @@ export type AssignmentTarget =
 type ResourceAssignmentDialogProps = {
   target: AssignmentTarget | null;
   activeIncidents: Incident[];
-  availableTeams: Responder[];
   selectedIncident: string;
-  selectedTeam: string;
   onSelectedIncident: (incidentId: string) => void;
-  onSelectedTeam: (teamId: string) => void;
   onClose: () => void;
   onConfirm: () => void;
   isConfirming?: boolean;
@@ -31,21 +33,21 @@ type ResourceAssignmentDialogProps = {
 export function ResourceAssignmentDialog({
   target,
   activeIncidents,
-  availableTeams,
   selectedIncident,
-  selectedTeam,
   onSelectedIncident,
-  onSelectedTeam,
   onClose,
   onConfirm,
   isConfirming = false
 }: ResourceAssignmentDialogProps) {
   const isResource = target?.kind === "resource";
-  const canConfirm = isResource ? Boolean(selectedTeam) : Boolean(selectedIncident);
+  const [reviewed, setReviewed] = useState(false);
+  const { online } = useConnectivity();
+  const selectedIncidentOption = activeIncidents.find((incident) => incident.id === selectedIncident) ?? null;
+  const canConfirm = Boolean(selectedIncident) && reviewed && online;
 
   return (
     <Dialog open={Boolean(target)} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>{isResource ? "Assign Resource to Team" : "Assign to Incident"}</DialogTitle>
+      <DialogTitle>{isResource ? "Assign Resource to Incident" : "Assign Responder to Incident"}</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
           <Typography color="text.secondary">
@@ -54,43 +56,35 @@ export function ResourceAssignmentDialog({
           <Typography variant="h6" color="secondary">
             {target?.name}
           </Typography>
-          {isResource ? (
-            <TextField
-              select
-              fullWidth
-              label="Responding Team"
-              value={selectedTeam}
-              onChange={(event) => onSelectedTeam(event.target.value)}
-            >
-              {availableTeams.map((team) => (
-                <MenuItem key={team.id} value={team.id}>
-                  {team.name} - {team.agency} - {team.availability}
-                </MenuItem>
-              ))}
-            </TextField>
-          ) : (
-            <TextField
-              select
-              fullWidth
-              label="Active Incident"
-              value={selectedIncident}
-              onChange={(event) => onSelectedIncident(event.target.value)}
-            >
-              {activeIncidents.map((incident) => (
-                <MenuItem key={incident.id} value={incident.id}>
-                  {incident.id} - {incident.category} - {incident.location}
-                </MenuItem>
-              ))}
-            </TextField>
+          <Autocomplete
+            options={activeIncidents}
+            value={selectedIncidentOption}
+            getOptionLabel={(incident) => `${incident.id} · ${incident.category} · ${incident.location}`}
+            onChange={(_, incident) => {
+              setReviewed(false);
+              onSelectedIncident(incident?.id ?? "");
+            }}
+            renderInput={(params) => <TextField {...params} label="Search active incident" />}
+          />
+          {selectedIncidentOption && (
+            <Alert severity="info">
+              Review: dispatch {target?.name} to {selectedIncidentOption.id} at {selectedIncidentOption.location}.
+            </Alert>
           )}
+          {!online && <Alert severity="info">Offline · Local Sync. Dispatch commands wait for a network connection.</Alert>}
+          <FormControlLabel
+            control={<Checkbox checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} />}
+            label="I reviewed the incident, destination, and operational impact."
+            sx={{ alignItems: "flex-start" }}
+          />
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button variant="outlined" onClick={onClose}>
+        <Button variant="outlined" onClick={() => { setReviewed(false); onClose(); }}>
           Cancel
         </Button>
         <Button onClick={onConfirm} disabled={!canConfirm || isConfirming}>
-          {isConfirming ? "Assigning..." : "Confirm Assignment"}
+          {isConfirming ? "Assigning..." : "Confirm Dispatch"}
         </Button>
       </DialogActions>
     </Dialog>
