@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { ReactNode } from "react";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
@@ -10,8 +11,10 @@ import DashboardIcon from "@mui/icons-material/Dashboard";
 import DescriptionIcon from "@mui/icons-material/Description";
 import GroupIcon from "@mui/icons-material/Group";
 import MapIcon from "@mui/icons-material/Map";
+import ListAltOutlinedIcon from "@mui/icons-material/ListAltOutlined";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
 import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
+import SensorsOutlinedIcon from "@mui/icons-material/SensorsOutlined";
 import SettingsIcon from "@mui/icons-material/Settings";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
@@ -22,7 +25,6 @@ import ListItemIcon from "@mui/material/ListItemIcon";
 import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { BrandLogo } from "@/components/BrandLogo";
 import { mdrrmoPalette } from "@/theme/theme";
 
 export const drawerWidth = 272;
@@ -37,10 +39,17 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
       { label: "Live Alerts", href: "/alerts", icon: <NotificationsActiveIcon /> },
-      { label: "Responders & Resources", href: "/responders", icon: <PeopleAltIcon /> },
+      { label: "Incidents", href: "/incidents", icon: <ListAltOutlinedIcon /> },
+      { label: "Responders", href: "/responders", icon: <PeopleAltIcon /> },
     ],
   },
-  { label: "GIS & Mapping", items: [{ label: "Incident Map", href: "/map", icon: <MapIcon /> }] },
+  {
+    label: "GIS and Devices",
+    items: [
+      { label: "Incident Map", href: "/map", icon: <MapIcon /> },
+      { label: "Nodes", href: "/nodes", icon: <SensorsOutlinedIcon /> },
+    ],
+  },
   {
     label: "Reporting",
     items: [
@@ -72,7 +81,14 @@ export function Sidebar({ role, collapsed = false, mobile = false, onNavigate, o
       <Stack direction="row" sx={{ minHeight: 72, p: collapsed ? 1.5 : 2, alignItems: "center", justifyContent: "space-between" }}>
         {collapsed ? (
           <Typography aria-label="NodeGuard" sx={{ width: "100%", textAlign: "center", fontWeight: 900, color: mdrrmoPalette.readyWhite }}>NG</Typography>
-        ) : <BrandLogo compact />}
+        ) : (
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
+            <Box sx={{ width: 40, height: 40, borderRadius: "50%", bgcolor: "white", overflow: "hidden", position: "relative", flexShrink: 0 }}>
+              <Image src="/mdrrmc-logo.png" alt="La Trinidad MDRRMC seal" fill sizes="40px" style={{ objectFit: "contain" }} />
+            </Box>
+            <Typography sx={{ color: "white", fontWeight: 900, letterSpacing: "0.01em" }}>NodeGuard</Typography>
+          </Stack>
+        )}
         {!mobile && !collapsed && (
           <IconButton color="inherit" onClick={onToggleCollapse} aria-label="Collapse navigation"><ChevronLeftIcon /></IconButton>
         )}
@@ -88,7 +104,7 @@ export function Sidebar({ role, collapsed = false, mobile = false, onNavigate, o
           return (
             <Box key={group.label} sx={{ mb: 1.5 }}>
               {!collapsed && (
-                <Typography variant="overline" sx={{ px: 1.25, color: "rgba(255,255,255,0.58)", fontWeight: 900, letterSpacing: "0.08em" }}>
+                <Typography variant="overline" sx={{ px: 1.25, color: "rgba(255,255,255,0.72)", fontWeight: 900, letterSpacing: "0.08em" }}>
                   {group.label}
                 </Typography>
               )}

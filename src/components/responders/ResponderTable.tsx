@@ -15,6 +15,7 @@ import TableRow from "@mui/material/TableRow";
 import TableSortLabel from "@mui/material/TableSortLabel";
 import Typography from "@mui/material/Typography";
 import { StatusChip } from "@/components/StatusChip";
+import { formatPhilippineDateTime } from "@/config/incidentOperations";
 import { Responder } from "@/types";
 
 type ResponderTableProps = {
@@ -78,7 +79,7 @@ export function ResponderTable({ responders, onAssign }: ResponderTableProps) {
                 {[
                   ["Contact", responder.contactNumber],
                   ["Current Assignment", responder.currentAssignment],
-                  ["Last Update", responder.lastStatusUpdate],
+                  ["Last Update", `${formatPhilippineDateTime(responder.lastStatusUpdate)} PHT`],
                 ].map(([label, value]) => (
                   <Box key={label} sx={{ minWidth: 0 }}>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{label}</Typography>
@@ -130,7 +131,7 @@ export function ResponderTable({ responders, onAssign }: ResponderTableProps) {
                   <StatusChip status={responder.availability} />
                 </TableCell>
                 <TableCell>{responder.currentAssignment}</TableCell>
-                <TableCell>{responder.lastStatusUpdate}</TableCell>
+                <TableCell>{formatPhilippineDateTime(responder.lastStatusUpdate)} PHT</TableCell>
                 <TableCell align="right">
                   <Button
                     size="small"

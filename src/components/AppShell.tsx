@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import Box from "@mui/material/Box";
@@ -12,9 +12,13 @@ import Typography from "@mui/material/Typography";
 import { appHeaderHeight, Header } from "@/components/Header";
 import { ConnectivityBar, connectivityBarHeight } from "@/components/connectivity/ConnectivityBar";
 import { ConnectivityProvider } from "@/components/connectivity/ConnectivityProvider";
+import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
 import { RealtimeRefresh } from "@/components/RealtimeRefresh";
 import { collapsedDrawerWidth, Sidebar, drawerWidth } from "@/components/Sidebar";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { fetchDeviceNodes } from "@/lib/nodeguardRepository";
+import { deviceNodes as deviceSeed } from "@/data/devices";
+import type { DeviceNode } from "@/types";
 
 type Operator = {
   name: string;
@@ -29,8 +33,17 @@ function formatRole(role: string) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  return (
+    <ConnectivityProvider>
+      <AppShellFrame>{children}</AppShellFrame>
+    </ConnectivityProvider>
+  );
+}
+
+function AppShellFrame({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { mode } = useConnectivity();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [operator, setOperator] = useState<Operator | null>(
@@ -38,6 +51,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       ? null
       : { name: "Demo Operator", role: "super_admin" },
   );
+  const [nodes, setNodes] = useState<DeviceNode[]>(
+    isSupabaseConfigured() ? [] : deviceSeed,
+  );
+  const [systemHealthy, setSystemHealthy] = useState(!isSupabaseConfigured());
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
   useEffect(() => {
     const restorePreference = window.setTimeout(
@@ -86,6 +104,27 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [router]);
 
+  const loadNodeHealth = useCallback(async () => {
+    try {
+      const nextNodes = await fetchDeviceNodes();
+      setNodes(nextNodes);
+      setSystemHealthy(true);
+      setLastSynced(new Date());
+    } catch {
+      setSystemHealthy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!operator) return;
+    const initialLoad = window.setTimeout(() => void loadNodeHealth(), 0);
+    window.addEventListener("nodeguard:realtime-change", loadNodeHealth);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.removeEventListener("nodeguard:realtime-change", loadNodeHealth);
+    };
+  }, [loadNodeHealth, operator]);
+
   const logout = async () => {
     const supabase = getSupabaseClient();
     if (supabase) await supabase.auth.signOut();
@@ -122,6 +161,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const desktopDrawerWidth = sidebarCollapsed ? collapsedDrawerWidth : drawerWidth;
+  const onlineNodes = nodes.filter((node) => node.status === "Online").length;
+  const unavailableNodes = nodes.length - onlineNodes;
+  const showConnectivityWarning = mode !== "online" || !systemHealthy || unavailableNodes >= 2;
+  const connectivityOffset = showConnectivityWarning ? connectivityBarHeight : 0;
   const toggleSidebar = () => {
     setSidebarCollapsed((current) => {
       window.localStorage.setItem("nodeguard.sidebar-collapsed", String(!current));
@@ -130,7 +173,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ConnectivityProvider>
     <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "background.default" }}>
       <RealtimeRefresh />
       <Header
@@ -138,8 +180,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         operatorName={operator.name}
         roleLabel={formatRole(operator.role)}
         onLogout={logout}
+        systemHealthy={systemHealthy}
+        lastSynced={lastSynced}
+        nodeHealth={{ online: onlineNodes, total: nodes.length }}
       />
-      <ConnectivityBar />
+      <ConnectivityBar systemHealthy={systemHealthy} unavailableNodes={unavailableNodes} />
       <Box component="nav" sx={{ width: { md: desktopDrawerWidth }, flexShrink: { md: 0 }, transition: "width 180ms ease" }}>
         <Drawer
           variant="temporary"
@@ -151,8 +196,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             "& .MuiDrawer-paper": {
               width: `min(${drawerWidth}px, 92vw)`,
               maxWidth: "100%",
-              top: appHeaderHeight + connectivityBarHeight,
-              height: `calc(100% - ${appHeaderHeight + connectivityBarHeight}px)`,
+              top: appHeaderHeight + connectivityOffset,
+              height: `calc(100% - ${appHeaderHeight + connectivityOffset}px)`,
             }
           }}
         >
@@ -165,8 +210,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             "& .MuiDrawer-paper": {
               width: desktopDrawerWidth,
               boxSizing: "border-box",
-              top: appHeaderHeight + connectivityBarHeight,
-              height: `calc(100% - ${appHeaderHeight + connectivityBarHeight}px)`,
+              top: appHeaderHeight + connectivityOffset,
+              height: `calc(100% - ${appHeaderHeight + connectivityOffset}px)`,
               transition: "width 180ms ease"
             }
           }}
@@ -177,10 +222,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       </Box>
       <Box component="main" sx={{ flexGrow: 1, minWidth: 0, width: { md: `calc(100% - ${desktopDrawerWidth}px)` }, overflowX: "clip" }}>
         <Toolbar sx={{ minHeight: `${appHeaderHeight}px !important` }} />
-        <Box sx={{ height: connectivityBarHeight }} />
+        {showConnectivityWarning && <Box sx={{ height: connectivityBarHeight }} />}
         <Box sx={{ width: "100%", p: { xs: 1.5, sm: 2, md: 3 }, maxWidth: 1500, mx: "auto" }}>{children}</Box>
       </Box>
     </Box>
-    </ConnectivityProvider>
   );
 }

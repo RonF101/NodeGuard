@@ -7,6 +7,8 @@ import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
+import Box from "@mui/material/Box";
+import Divider from "@mui/material/Divider";
 import Grid from "@mui/material/Grid";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
@@ -20,11 +22,26 @@ import MapIcon from "@mui/icons-material/Map";
 import { useEffect, useMemo, useState } from "react";
 import { Incident, Responder, ValidationStatus } from "@/types";
 import { StatusChip } from "@/components/StatusChip";
+import { PriorityChip } from "@/components/PriorityChip";
 import { authorizedFetch } from "@/lib/auth";
 import { SafeConfirmDialog } from "@/components/SafeConfirmDialog";
 import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
+import {
+  formatPhilippineDateTime,
+  getElapsedWaitingTime,
+  getValidIncidentActions,
+} from "@/config/incidentOperations";
 
-type SafeAction = "assign" | "activate-buzzer" | "deactivate-buzzer" | "false-alarm" | null;
+type SafeAction =
+  | "assign"
+  | "activate-buzzer"
+  | "deactivate-buzzer"
+  | "false-alarm"
+  | "start-response"
+  | "mark-on-scene"
+  | "resolve"
+  | "close"
+  | null;
 
 type IncidentModalProps = {
   incident: Incident | null;
@@ -50,12 +67,13 @@ export function IncidentModal({
   const [buzzerMessage, setBuzzerMessage] = useState<string | null>(null);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [safeAction, setSafeAction] = useState<SafeAction>(null);
   const [draftSaved, setDraftSaved] = useState(false);
   const { online, lowBandwidth } = useConnectivity();
-  const isClosedForAssignment = ["Resolved", "Closed", "False Alert"].includes(
-    incident?.status ?? "Closed",
-  );
+  const validActions = incident ? getValidIncidentActions(incident) : [];
+  const canAssign = validActions.includes("dispatch") || validActions.includes("reassign");
 
   const assignableResponders = useMemo(
     () =>
@@ -133,9 +151,9 @@ export function IncidentModal({
     switch (safeAction) {
       case "assign":
         return {
-          title: "Review team dispatch",
-          summary: `Dispatch ${selectedResponderOption?.name ?? "the selected team"} to ${incident.id} at ${incident.location}.`,
-          confirmLabel: "Confirm Dispatch",
+          title: validActions.includes("reassign") ? "Review team reassignment" : "Review team dispatch",
+          summary: `${validActions.includes("reassign") ? "Reassign" : "Dispatch"} ${selectedResponderOption?.name ?? "the selected team"} to ${incident.id} at ${incident.location}.`,
+          confirmLabel: validActions.includes("reassign") ? "Confirm Reassignment" : "Confirm Dispatch",
           tone: "set" as const,
         };
       case "activate-buzzer":
@@ -159,6 +177,14 @@ export function IncidentModal({
           confirmLabel: "Mark False Alarm",
           tone: "set" as const,
         };
+      case "start-response":
+        return { title: "Start active response", summary: `Confirm that the dispatched team is actively responding to ${incident.id}.`, confirmLabel: "Mark Responding", tone: "set" as const };
+      case "mark-on-scene":
+        return { title: "Confirm team arrival", summary: `Confirm that the assigned team has reached ${incident.location}.`, confirmLabel: "Mark On Scene", tone: "set" as const };
+      case "resolve":
+        return { title: "Resolve incident", summary: `Confirm that the immediate emergency for ${incident.id} has been addressed. The record can still be reviewed before closure.`, confirmLabel: "Resolve Incident", tone: "set" as const };
+      case "close":
+        return { title: "Close incident record", summary: `Close ${incident.id} after operational review. This removes it from active monitoring.`, confirmLabel: "Close Incident", tone: "set" as const };
       default:
         return { title: "Review action", summary: "Review this action before continuing.", confirmLabel: "Confirm", tone: "set" as const };
     }
@@ -170,6 +196,10 @@ export function IncidentModal({
     if (action === "assign") await assignResponder();
     if (action === "activate-buzzer" || action === "deactivate-buzzer") await toggleBuzzer();
     if (action === "false-alarm") await validateAlert("False Alarm");
+    if (action === "start-response") await updateWorkflowStatus("Responding");
+    if (action === "mark-on-scene") await updateWorkflowStatus("On Scene");
+    if (action === "resolve") await updateWorkflowStatus("Resolved");
+    if (action === "close") await updateWorkflowStatus("Closed");
   };
 
   const validateAlert = async (validationStatus: ValidationStatus) => {
@@ -190,24 +220,55 @@ export function IncidentModal({
     onAssigned?.();
   };
 
+  const updateWorkflowStatus = async (
+    status: "Responding" | "On Scene" | "Resolved" | "Closed",
+  ) => {
+    setIsUpdatingStatus(true);
+    setStatusMessage(null);
+    const response = await authorizedFetch("/api/update-incident-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ incidentId: incident.id, status }),
+    });
+    const result = (await response.json()) as { ok: boolean; reason?: string };
+    setIsUpdatingStatus(false);
+    if (!result.ok) {
+      setStatusMessage(result.reason ?? "Status update failed.");
+      return;
+    }
+    setStatusMessage(`Incident marked ${status.toLowerCase()}.`);
+    onAssigned?.();
+  };
+
   const mapQuery = incident.coordinates || incident.approximateAddress || incident.location;
   const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle>{incident.id}</DialogTitle>
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md" aria-labelledby="incident-details-title">
+      <DialogTitle id="incident-details-title">
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { sm: "center" }, justifyContent: "space-between" }}>
+          <Box>
+            <Typography variant="h6" color="secondary">{incident.id}</Typography>
+            <Typography variant="body2" color="text.secondary">Incident details and valid operational actions</Typography>
+          </Box>
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+            <PriorityChip priority={incident.priority} />
+            <StatusChip status={incident.status} />
+          </Stack>
+        </Stack>
+      </DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2}>
           {[
             ["Category", incident.category],
-            ["Device", incident.deviceId],
-            ["Location", incident.location],
-            ["Address", incident.approximateAddress ?? "Not recorded"],
+            ["Node ID", incident.deviceId],
+            ["Registered Location", incident.location],
+            ["Address / Landmark", incident.approximateAddress ?? "Not recorded"],
             ["Coordinates", incident.coordinates ?? "Not recorded"],
-            ["Timestamp", incident.timestamp],
+            ["Reported", `${formatPhilippineDateTime(incident.timestamp)} PHT`],
+            ["Elapsed Time", getElapsedWaitingTime(incident)],
             ["Trigger Method", incident.triggerMethod],
-            ["Priority", incident.priority],
-            ["Assigned Responder", incident.assignedResponder],
+            ["Assigned Team", incident.assignedResponder],
           ].map(([label, value]) => (
             <Grid key={label} size={{ xs: 12, sm: 6 }}>
               <Typography
@@ -222,18 +283,7 @@ export function IncidentModal({
               </Typography>
             </Grid>
           ))}
-          <Grid size={{ xs: 12 }}>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontWeight: 800 }}
-            >
-              Status
-            </Typography>
-            <Stack direction="row" sx={{ mt: 0.5 }}>
-              <StatusChip status={incident.status} />
-            </Stack>
-          </Grid>
+          <Grid size={{ xs: 12 }}><Divider /></Grid>
           <Grid size={{ xs: 12 }}>
             <Stack
               direction={{ xs: "column", sm: "row" }}
@@ -248,7 +298,7 @@ export function IncidentModal({
             >
               <Stack spacing={0.4}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
-                  Alert Validation
+                  Verification
                 </Typography>
                 <Typography sx={{ fontWeight: 800 }}>
                   {incident.validationStatus ?? "Pending Review"}
@@ -259,29 +309,43 @@ export function IncidentModal({
                   </Typography>
                 )}
               </Stack>
-              {(incident.validationStatus ?? "Pending Review") === "Pending Review" && (
+              {(validActions.includes("verify") || validActions.includes("false-alert")) && (
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                  <Button
+                  {validActions.includes("verify") && <Button
                     color="success"
                     startIcon={<FactCheckIcon />}
                     disabled={isValidating}
                     onClick={() => validateAlert("Confirmed")}
                   >
-                    Confirm Alert
-                  </Button>
-                  <Button
+                    Verify Alert
+                  </Button>}
+                  {validActions.includes("false-alert") && <Button
                     color="primary"
                     variant="outlined"
                     startIcon={<ReportProblemIcon />}
                     disabled={isValidating}
                     onClick={() => setSafeAction("false-alarm")}
                   >
-                    Mark False Alarm
-                  </Button>
+                    Mark as False Alert
+                  </Button>}
                 </Stack>
               )}
             </Stack>
           </Grid>
+          {validActions.some((action) => ["start-response", "mark-on-scene", "resolve", "close"].includes(action)) && (
+            <Grid size={{ xs: 12 }}>
+              <Stack spacing={1} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.5 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Valid Status Actions</Typography>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+                  {validActions.includes("start-response") && <Button variant="outlined" disabled={!online || isUpdatingStatus} onClick={() => setSafeAction("start-response")}>Start Response</Button>}
+                  {validActions.includes("mark-on-scene") && <Button variant="outlined" disabled={!online || isUpdatingStatus} onClick={() => setSafeAction("mark-on-scene")}>Mark On Scene</Button>}
+                  {validActions.includes("resolve") && <Button color="success" disabled={!online || isUpdatingStatus} onClick={() => setSafeAction("resolve")}>Resolve</Button>}
+                  {validActions.includes("close") && <Button variant="outlined" disabled={!online || isUpdatingStatus} onClick={() => setSafeAction("close")}>Close Incident</Button>}
+                </Stack>
+                {statusMessage && <Typography variant="body2" color={statusMessage.includes("failed") ? "error" : "success.main"} sx={{ fontWeight: 700 }}>{statusMessage}</Typography>}
+              </Stack>
+            </Grid>
+          )}
           <Grid size={{ xs: 12 }}>
             <Typography
               variant="caption"
@@ -377,7 +441,7 @@ export function IncidentModal({
               color="text.secondary"
               sx={{ fontWeight: 800 }}
             >
-              Field Notes / Response Updates
+              Incident History &amp; Field Updates
             </Typography>
             {incident.fieldNoteCount ? (
               <Stack spacing={1} sx={{ mt: 0.5 }}>
@@ -432,13 +496,13 @@ export function IncidentModal({
           <Grid size={{ xs: 12 }}>
             <Stack spacing={1.5} sx={{ mt: 1 }}>
               <Typography variant="h6" color="secondary">
-                {isClosedForAssignment
-                  ? "Assignment Closed"
-                  : "Assign Personnel"}
+                {canAssign
+                  ? validActions.includes("reassign") ? "Reassign Response Team" : "Dispatch Response Team"
+                  : "Team Assignment"}
               </Typography>
-              {isClosedForAssignment ? (
+              {!canAssign ? (
                 <Typography variant="body2" color="text.secondary">
-                  This alert is already final and cannot be assigned again.
+                  Team dispatch is not valid during the current workflow stage.
                 </Typography>
               ) : (
                 <Autocomplete
@@ -455,10 +519,10 @@ export function IncidentModal({
                   renderInput={(params) => <TextField {...params} label="Search responder or team" />}
                 />
               )}
-              {draftSaved && !isClosedForAssignment && (
+              {draftSaved && canAssign && (
                 <Typography variant="caption" color="primary" sx={{ fontWeight: 800 }}>Dispatch draft saved locally on this device.</Typography>
               )}
-              {!online && !isClosedForAssignment && (
+              {!online && canAssign && (
                 <Alert severity="info">Offline · Local Sync. Drafts remain available, but dispatch commands wait for a network connection.</Alert>
               )}
               {assignmentMessage && (
@@ -501,11 +565,11 @@ export function IncidentModal({
         </Button>
         <Button
           onClick={() => setSafeAction("assign")}
-          disabled={isClosedForAssignment || !selectedResponder || isAssigning || !online}
+          disabled={!canAssign || !selectedResponder || isAssigning || !online}
         >
-          {isAssigning ? "Assigning..." : "Assign Personnel"}
+          {isAssigning ? "Sending..." : validActions.includes("reassign") ? "Reassign Team" : "Dispatch Team"}
         </Button>
-        <Button onClick={onClose}>Close</Button>
+        <Button onClick={onClose}>Close Details</Button>
       </DialogActions>
       <SafeConfirmDialog
         key={safeAction ?? "closed"}
@@ -514,7 +578,7 @@ export function IncidentModal({
         summary={safeDialogCopy.summary}
         confirmLabel={safeDialogCopy.confirmLabel}
         tone={safeDialogCopy.tone}
-        busy={isAssigning || isTogglingBuzzer || isValidating}
+        busy={isAssigning || isTogglingBuzzer || isValidating || isUpdatingStatus}
         blockedReason={!online ? "Offline · Local Sync. High-impact commands are never queued automatically." : undefined}
         onCancel={() => setSafeAction(null)}
         onConfirm={() => void confirmSafeAction()}

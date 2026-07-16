@@ -1,12 +1,12 @@
 import { Suspense } from "react";
 import CircularProgress from "@mui/material/CircularProgress";
 import Stack from "@mui/material/Stack";
-import { IncidentOperationsView } from "@/components/IncidentOperationsView";
+import { NodesView } from "@/components/NodesView";
 
-export default function LiveAlertsPage() {
+export default function NodesPage() {
   return (
     <Suspense fallback={<Stack sx={{ minHeight: "100vh", alignItems: "center", justifyContent: "center" }}><CircularProgress /></Stack>}>
-      <IncidentOperationsView mode="live" />
+      <NodesView />
     </Suspense>
   );
 }

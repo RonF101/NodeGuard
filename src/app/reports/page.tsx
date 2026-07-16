@@ -27,6 +27,7 @@ import { Incident, Report } from "@/types";
 import { fetchIncidents } from "@/lib/nodeguardRepository";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { NODEGUARD_REALTIME_EVENT } from "@/components/RealtimeRefresh";
+import { formatPhilippineDateTime } from "@/config/incidentOperations";
 
 function toReport(incident: Incident, index: number): Report {
   return {
@@ -101,7 +102,7 @@ export default function ReportsPage() {
         report.category,
         report.location,
         report.status,
-        report.closedAt,
+        `${formatPhilippineDateTime(report.closedAt)} PHT`,
         report.responseTime,
         report.leadAgency,
       ]),
@@ -177,7 +178,7 @@ export default function ReportsPage() {
                 </Typography>
                 <Typography sx={{ mt: 1 }}>{report.location}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Closed: {report.closedAt}
+                  Closed: {formatPhilippineDateTime(report.closedAt)} PHT
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Lead Agency: {report.leadAgency} - Response Time: {report.responseTime}
@@ -214,7 +215,7 @@ export default function ReportsPage() {
                   ["Category", selectedReport.category],
                   ["Location", selectedReport.location],
                   ["Status", selectedReport.status],
-                  ["Closed At", selectedReport.closedAt],
+                  ["Closed At", `${formatPhilippineDateTime(selectedReport.closedAt)} PHT`],
                   ["Lead Agency", selectedReport.leadAgency],
                   ["Response Time", selectedReport.responseTime]
                 ].map(([label, value]) => (

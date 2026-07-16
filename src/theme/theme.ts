@@ -69,7 +69,17 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           border: `1px solid ${mdrrmoPalette.border}`,
-          boxShadow: "0 8px 22px rgba(11, 31, 51, 0.07)"
+          boxShadow: "0 2px 8px rgba(11, 31, 51, 0.06)"
+        }
+      }
+    },
+    MuiCardActionArea: {
+      styleOverrides: {
+        root: {
+          "&:focus-visible": {
+            outline: `3px solid ${mdrrmoPalette.setBlue}`,
+            outlineOffset: -3
+          }
         }
       }
     },
@@ -80,7 +90,13 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 8,
-          minHeight: 48
+          minHeight: 48,
+          boxShadow: "none",
+          "&:hover": { boxShadow: "0 2px 6px rgba(11, 31, 51, 0.14)" },
+          "&:focus-visible": {
+            outline: `3px solid ${mdrrmoPalette.setBlueDark}`,
+            outlineOffset: 2
+          }
         }
       }
     },
@@ -88,7 +104,11 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           minWidth: 48,
-          minHeight: 48
+          minHeight: 48,
+          "&:focus-visible": {
+            outline: `3px solid ${mdrrmoPalette.setBlue}`,
+            outlineOffset: 2
+          }
         }
       }
     },
@@ -139,6 +159,27 @@ export const theme = createTheme({
           maxWidth: "100%",
           overflowX: "auto",
           WebkitOverflowScrolling: "touch"
+        }
+      }
+    },
+    MuiTableCell: {
+      styleOverrides: {
+        root: {
+          paddingTop: 12,
+          paddingBottom: 12
+        },
+        head: {
+          minHeight: 52,
+          backgroundColor: "#F8FAFC",
+          color: mdrrmoPalette.setBlueDark,
+          fontWeight: 900
+        }
+      }
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          minHeight: 48
         }
       }
     },

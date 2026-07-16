@@ -15,7 +15,7 @@ function toAnalyticsIncident(incident: Incident): AnalyticsIncident {
   const validationStatus = incident.validationStatus ??
     (incident.status === "False Alert"
       ? "False Alarm"
-      : incident.status === "New Alert"
+      : incident.status === "Pending Verification"
         ? "Pending Review"
         : "Confirmed");
   return {

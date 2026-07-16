@@ -15,6 +15,7 @@ import TableRow from "@mui/material/TableRow";
 import TableSortLabel from "@mui/material/TableSortLabel";
 import Typography from "@mui/material/Typography";
 import { ResourceStatusChip } from "@/components/responders/ResourceStatusChip";
+import { formatPhilippineDateTime } from "@/config/incidentOperations";
 import { ResponseResource } from "@/types";
 
 type ResourceTableProps = {
@@ -80,7 +81,7 @@ export function ResourceTable({ resources, onAssign }: ResourceTableProps) {
                 {[
                   ["Base Location", resource.baseLocation],
                   ["Assigned Incident", resource.assignedIncident],
-                  ["Last Updated", resource.lastUpdated],
+                  ["Last Updated", `${formatPhilippineDateTime(resource.lastUpdated)} PHT`],
                   ["Capacity / Notes", resource.notes],
                 ].map(([label, value]) => (
                   <Box key={label} sx={{ minWidth: 0 }}>
@@ -135,7 +136,7 @@ export function ResourceTable({ resources, onAssign }: ResourceTableProps) {
                 <TableCell>{resource.baseLocation}</TableCell>
                 <TableCell>{resource.assignedIncident}</TableCell>
                 <TableCell sx={{ minWidth: 220 }}>{resource.notes}</TableCell>
-                <TableCell>{resource.lastUpdated}</TableCell>
+                <TableCell>{formatPhilippineDateTime(resource.lastUpdated)} PHT</TableCell>
                 <TableCell align="right">
                   <Button
                     size="small"

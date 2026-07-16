@@ -1,6 +1,7 @@
 import Chip from "@mui/material/Chip";
 import { IncidentStatus, ResponderStatus, ResourceStatus } from "@/types";
 import { mdrrmoPalette } from "@/theme/theme";
+import { incidentStatusConfig } from "@/config/incidentOperations";
 
 type StatusChipProps = {
   status: IncidentStatus | ResponderStatus | ResourceStatus | "Active" | "Disabled" | "Online" | "Maintenance";
@@ -8,15 +9,6 @@ type StatusChipProps = {
 };
 
 const statusColors: Record<string, { bg: string; color: string }> = {
-  "New Alert": { bg: mdrrmoPalette.setBlueSoft, color: mdrrmoPalette.setBlueDark },
-  Assigned: { bg: mdrrmoPalette.setBlueSoft, color: mdrrmoPalette.setBlueDark },
-  "En Route": { bg: mdrrmoPalette.setBlueSoft, color: mdrrmoPalette.setBlue },
-  "On Scene": { bg: mdrrmoPalette.goRedSoft, color: mdrrmoPalette.goRed },
-  Responding: { bg: mdrrmoPalette.goRedSoft, color: mdrrmoPalette.goRed },
-  Resolved: { bg: "#E7F4E8", color: mdrrmoPalette.successGreen },
-  Closed: { bg: "#ECEFF1", color: "#455A64" },
-  "Need Backup": { bg: "#FFEBEE", color: mdrrmoPalette.alertRed },
-  "False Alert": { bg: "#ECEFF1", color: "#455A64" },
   Available: { bg: "#E7F4E8", color: mdrrmoPalette.successGreen },
   Dispatched: { bg: mdrrmoPalette.setBlueSoft, color: mdrrmoPalette.setBlue },
   Busy: { bg: mdrrmoPalette.setBlueSoft, color: mdrrmoPalette.setBlueDark },
@@ -31,16 +23,22 @@ const statusColors: Record<string, { bg: string; color: string }> = {
 };
 
 export function StatusChip({ status, size = "small" }: StatusChipProps) {
-  const colors = statusColors[status] ?? { bg: "#ECEFF1", color: "#455A64" };
+  const incidentConfiguration = incidentStatusConfig[status as IncidentStatus];
+  const colors = incidentConfiguration
+    ? { bg: incidentConfiguration.background, color: incidentConfiguration.color }
+    : statusColors[status] ?? { bg: "#ECEFF1", color: "#455A64" };
+  const Icon = incidentConfiguration?.icon;
 
   return (
     <Chip
       label={status}
+      icon={Icon ? <Icon aria-hidden fontSize="small" /> : undefined}
       size={size}
       sx={{
         bgcolor: colors.bg,
         color: colors.color,
-        borderRadius: 1
+        borderRadius: 1,
+        "& .MuiChip-icon": { color: "inherit" },
       }}
     />
   );

@@ -97,6 +97,7 @@ type DeviceLocationRow = {
   coordinates?: string;
   zone?: string;
   status: "online" | "maintenance" | "offline";
+  updated_at?: string;
 };
 
 type ResourceRow = {
@@ -196,7 +197,7 @@ export async function fetchDeviceNodes(): Promise<DeviceNode[]> {
   const { data, error } = await supabase
     .from("device_locations")
     .select(
-      "device_id, name, location_name, approximate_address, coordinates, map_x, map_y, zone, status",
+      "device_id, name, location_name, approximate_address, coordinates, map_x, map_y, zone, status, updated_at",
     )
     .order("device_id");
 
@@ -223,6 +224,14 @@ export async function fetchDeviceNodes(): Promise<DeviceNode[]> {
         : row.status === "offline"
           ? "Offline"
           : "Online",
+    powerStatus: "Not reported by this node",
+    lastCommunication: row.updated_at ?? undefined,
+    maintenanceStatus:
+      row.status === "maintenance"
+        ? "Maintenance in progress"
+        : row.status === "offline"
+          ? "Connectivity inspection required"
+          : "No open maintenance",
   }));
 }
 
@@ -282,6 +291,43 @@ export async function submitIncidentStatusUpdate(
   });
 
   return error ? { ok: false, reason: error.message } : { ok: true };
+}
+
+export async function updateIncidentWorkflowStatus(
+  publicId: string,
+  status: Extract<IncidentStatus, "Responding" | "On Scene" | "Resolved" | "Closed">,
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { ok: true, reason: "Demo status update completed locally." };
+
+  const { data: incident, error: incidentError } = await supabase
+    .from("incidents")
+    .select("id")
+    .eq("public_id", publicId)
+    .single();
+  if (incidentError || !incident) {
+    return { ok: false, reason: incidentError?.message ?? "Incident not found." };
+  }
+
+  const { error } = await supabase.from("incident_status_updates").insert({
+    incident_id: incident.id,
+    status: mapWebStatusToDb(status),
+    remarks: `Status changed to ${status} from the NodeGuard operations dashboard.`,
+    created_by: actorId ?? null,
+  });
+  if (error) return { ok: false, reason: error.message };
+
+  if (actorId) {
+    await supabase.from("audit_logs").insert({
+      actor_profile_id: actorId,
+      action: "update_incident_status",
+      entity_type: "incident",
+      entity_id: publicId,
+      details: { status },
+    });
+  }
+  return { ok: true };
 }
 
 export async function assignResponderToIncident(
@@ -443,7 +489,7 @@ async function mapIncidentRow(
     deviceId: row.device_id,
     location: row.location_name,
     timestamp: formatTimestamp(row.occurred_at),
-    status: mapStatus(row.status),
+    status: mapStatus(row.status, row.validation_status),
     triggerMethod: row.trigger_method === "button" ? "Button" : "Voice",
     voiceContext: row.voice_context_available
       ? "Voice clip attached"
@@ -458,7 +504,9 @@ async function mapIncidentRow(
         ? "Critical"
         : row.priority === "high"
           ? "High"
-          : "Moderate",
+          : row.priority === "low"
+            ? "Low"
+            : "Moderate",
     buzzerActive: deviceLocation?.buzzer_active ?? false,
     buzzerUpdatedAt: deviceLocation?.buzzer_updated_at
       ? formatTimestamp(deviceLocation.buzzer_updated_at)
@@ -514,14 +562,17 @@ function mapCategory(category: IncidentRow["category"]): Incident["category"] {
   return "Fire/Disaster Emergency";
 }
 
-function mapStatus(status: IncidentRow["status"]): IncidentStatus {
+function mapStatus(
+  status: IncidentRow["status"],
+  validationStatus?: IncidentRow["validation_status"],
+): IncidentStatus {
   switch (status) {
     case "new_alert":
-      return "New Alert";
+      return validationStatus === "confirmed" ? "Verified" : "Pending Verification";
     case "assigned":
-      return "Assigned";
+      return "Dispatched";
     case "en_route":
-      return "En Route";
+      return "Dispatched";
     case "on_scene":
       return "On Scene";
     case "responding":
@@ -531,7 +582,7 @@ function mapStatus(status: IncidentRow["status"]): IncidentStatus {
     case "closed":
       return "Closed";
     case "need_backup":
-      return "Need Backup";
+      return "Responding";
     case "false_alert":
       return "False Alert";
   }
@@ -539,11 +590,10 @@ function mapStatus(status: IncidentRow["status"]): IncidentStatus {
 
 function mapWebStatusToDb(status: IncidentStatus) {
   switch (status) {
-    case "New Alert":
+    case "Pending Verification":
+    case "Verified":
       return "new_alert";
-    case "Assigned":
-      return "assigned";
-    case "En Route":
+    case "Dispatched":
       return "en_route";
     case "On Scene":
       return "on_scene";
@@ -553,8 +603,6 @@ function mapWebStatusToDb(status: IncidentStatus) {
       return "resolved";
     case "Closed":
       return "closed";
-    case "Need Backup":
-      return "need_backup";
     case "False Alert":
       return "false_alert";
   }
@@ -572,9 +620,5 @@ function mapResponderAvailability(
 function formatTimestamp(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day} ${hour}:${minute}`;
+  return date.toISOString();
 }

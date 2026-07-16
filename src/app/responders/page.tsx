@@ -160,7 +160,7 @@ export default function RespondersPage() {
           incident.id === selectedIncident
             ? {
                 ...incident,
-                status: "Assigned",
+                status: "Dispatched",
                 assignedResponder: assignmentTarget.name
               }
             : incident
@@ -207,7 +207,7 @@ export default function RespondersPage() {
     <AppShell>
       <PageHeader
         eyebrow="Agency Coordination"
-        title="Responders & Resources"
+        title="Responders"
         subtitle="Monitor personnel availability and response resources for emergency dispatch support."
       />
       {loadError && <Alert severity="error" sx={{ mb: 3 }}>{loadError}</Alert>}

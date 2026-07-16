@@ -1,11 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
-import CrisisAlertIcon from "@mui/icons-material/CrisisAlert";
-import FactCheckIcon from "@mui/icons-material/FactCheck";
 import MapIcon from "@mui/icons-material/Map";
-import TaskAltIcon from "@mui/icons-material/TaskAlt";
+import PortableWifiOffOutlinedIcon from "@mui/icons-material/PortableWifiOffOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -18,13 +15,19 @@ import { AppShell } from "@/components/AppShell";
 import { DashboardIncidentPanel } from "@/components/DashboardIncidentPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
-import { fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
+import { fetchDeviceNodes, fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
 import { mdrrmoPalette } from "@/theme/theme";
 import { incidents as incidentSeed } from "@/data/incidents";
 import { responders as responderSeed } from "@/data/responders";
-import { Incident, Responder } from "@/types";
+import { deviceNodes as deviceSeed } from "@/data/devices";
+import { DeviceNode, Incident, Responder } from "@/types";
 import { NODEGUARD_REALTIME_EVENT } from "@/components/RealtimeRefresh";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
+import { getOperationalMetrics, incidentStatusConfig, isFinalIncident, sortIncidentQueue } from "@/config/incidentOperations";
+
+const PendingVerificationIcon = incidentStatusConfig["Pending Verification"].icon;
+const AwaitingDispatchIcon = incidentStatusConfig.Dispatched.icon;
+const ActiveResponseIcon = incidentStatusConfig.Responding.icon;
 
 export default function DashboardPage() {
   const [incidents, setIncidents] = useState<Incident[]>(
@@ -33,16 +36,21 @@ export default function DashboardPage() {
   const [responders, setResponders] = useState<Responder[]>(
     isSupabaseConfigured() ? [] : responderSeed,
   );
+  const [devices, setDevices] = useState<DeviceNode[]>(
+    isSupabaseConfigured() ? [] : deviceSeed,
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadOperations = useCallback(async () => {
     try {
-      const [nextIncidents, nextResponders] = await Promise.all([
+      const [nextIncidents, nextResponders, nextDevices] = await Promise.all([
         fetchIncidents(),
         fetchResponders(),
+        fetchDeviceNodes(),
       ]);
       setIncidents(nextIncidents);
       setResponders(nextResponders);
+      setDevices(nextDevices);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load operations data.");
@@ -58,16 +66,18 @@ export default function DashboardPage() {
     };
   }, [loadOperations]);
 
-  const activeIncidents = incidents.filter((incident) => !["Resolved", "Closed", "False Alert"].includes(incident.status)).length;
-  const newAlerts = incidents.filter((incident) => incident.status === "New Alert").length;
-  const respondersActive = responders.filter((responder) => ["En Route", "On Scene", "Responding", "Busy"].includes(responder.availability)).length;
-  const resolvedToday = incidents.filter((incident) => incident.status === "Resolved").length;
+  const metrics = getOperationalMetrics(incidents);
+  const offlineNodes = devices.filter((device) => device.status === "Offline").length;
+  const incidentQueue = sortIncidentQueue(
+    incidents.filter((incident) => !isFinalIncident(incident.status)),
+  );
 
   return (
     <AppShell>
       <PageHeader
         eyebrow="Operations Overview"
         title="Dashboard"
+        subtitle="Prioritize unverified alerts, dispatch delays, active field response, and NodeGuard availability."
         actions={
           <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
             <Button href="/map" startIcon={<MapIcon />} variant="outlined">
@@ -76,45 +86,46 @@ export default function DashboardPage() {
           </Stack>
         }
       />
-      <Alert severity="info" sx={{ mb: 3, borderColor: mdrrmoPalette.cream }}>
-        Private NodeGuard workspace for authorized La Trinidad MDRRMO personnel.
-      </Alert>
       {loadError && <Alert severity="error" sx={{ mb: 3 }}>{loadError}</Alert>}
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <StatCard
-            label="Active Incidents"
-            value={activeIncidents}
-            helper="Open incidents requiring monitoring"
-            tone={mdrrmoPalette.setBlue}
-            icon={<CrisisAlertIcon />}
+            label="Pending Verification"
+            value={metrics.pendingVerification}
+            helper="New alerts requiring MDRRMO verification"
+            tone={incidentStatusConfig["Pending Verification"].color}
+            icon={<PendingVerificationIcon />}
+            href="/alerts?status=Pending%20Verification"
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <StatCard
-            label="New Alerts"
-            value={newAlerts}
-            helper="Newly activated nodes needing triage"
-            tone={mdrrmoPalette.setBlueDark}
-            icon={<FactCheckIcon />}
+            label="Awaiting Dispatch"
+            value={metrics.awaitingDispatch}
+            helper="Verified incidents without a dispatched team"
+            tone={incidentStatusConfig.Dispatched.color}
+            icon={<AwaitingDispatchIcon />}
+            href="/alerts?status=Verified"
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <StatCard
-            label="Active Responders"
-            value={respondersActive}
-            helper="Busy, en route, on scene, or responding"
-            tone={mdrrmoPalette.orange}
-            icon={<AssignmentTurnedInIcon />}
+            label="Active Responses"
+            value={metrics.activeResponses}
+            helper="Teams dispatched, responding, or on scene"
+            tone={incidentStatusConfig.Responding.color}
+            icon={<ActiveResponseIcon />}
+            href="/alerts?scope=active"
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <StatCard
-            label="Resolved Today"
-            value={resolvedToday}
-            helper="Closed from current operations"
-            tone={mdrrmoPalette.successGreen}
-            icon={<TaskAltIcon />}
+            label="Offline Nodes"
+            value={offlineNodes}
+            helper="Registered devices currently unreachable"
+            tone={offlineNodes ? mdrrmoPalette.alertRed : mdrrmoPalette.successGreen}
+            icon={<PortableWifiOffOutlinedIcon />}
+            href="/nodes?status=Offline"
           />
         </Grid>
       </Grid>
@@ -123,14 +134,14 @@ export default function DashboardPage() {
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 2, justifyContent: "space-between" }}>
             <Box>
               <Typography variant="h6" color="secondary">
-                Latest Alerts
+                Live Incident Queue
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Recent device-triggered events from La Trinidad NodeGuard units.
+                Actionable incidents are ordered by workflow stage, then oldest waiting time.
               </Typography>
             </Box>
           </Stack>
-          <DashboardIncidentPanel incidents={incidents.slice(0, 5)} responders={responders} />
+          <DashboardIncidentPanel incidents={incidentQueue} responders={responders} />
         </CardContent>
       </Card>
     </AppShell>

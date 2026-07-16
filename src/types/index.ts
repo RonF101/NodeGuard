@@ -2,15 +2,16 @@ export type EmergencyCategory =
   "Medical Emergency" | "Security/Public Safety" | "Fire/Disaster Emergency";
 
 export type IncidentStatus =
-  | "New Alert"
-  | "Assigned"
-  | "En Route"
-  | "On Scene"
+  | "Pending Verification"
+  | "Verified"
+  | "Dispatched"
   | "Responding"
+  | "On Scene"
   | "Resolved"
   | "Closed"
-  | "Need Backup"
   | "False Alert";
+
+export type IncidentPriority = "Critical" | "High" | "Moderate" | "Low";
 
 export type ResponderStatus =
   | "Available"
@@ -52,7 +53,7 @@ export interface Incident {
   nodeLocation?: string;
   coordinates?: string;
   assignedResponder: string;
-  priority: "Critical" | "High" | "Moderate";
+  priority: IncidentPriority;
   buzzerActive?: boolean;
   buzzerUpdatedAt?: string;
   fieldNoteCount?: number;
@@ -122,6 +123,9 @@ export interface DeviceNode {
   approximateAddress?: string;
   zone?: string;
   status: "Online" | "Maintenance" | "Offline";
+  powerStatus?: string;
+  lastCommunication?: string;
+  maintenanceStatus?: string;
   assignedIncidentId?: string;
 }
 
@@ -145,7 +149,7 @@ export interface AnalyticsIncident {
   status: IncidentStatus;
   validationStatus: ValidationStatus;
   assignedResponder: string;
-  priority: "Critical" | "High" | "Moderate";
+  priority: IncidentPriority;
   isFalseAlarm: boolean;
   responseTimeMinutes: number;
 }

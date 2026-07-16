@@ -34,7 +34,7 @@ function getNodeColor(incident?: Incident) {
   if (!incident || ["Resolved", "Closed", "False Alert"].includes(incident.status)) {
     return mdrrmoPalette.successGreen;
   }
-  if (["On Scene", "Responding", "Need Backup"].includes(incident.status) || incident.priority === "Critical") {
+  if (["On Scene", "Responding"].includes(incident.status) || incident.priority === "Critical") {
     return mdrrmoPalette.goRed;
   }
   return categoryColors[incident.category];
@@ -289,7 +289,7 @@ export function MapPanel() {
                   </Box>
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
-                      Assigned Responder
+                      Assigned Team
                     </Typography>
                     <Typography sx={{ fontWeight: 700 }}>{incident.assignedResponder}</Typography>
                   </Box>

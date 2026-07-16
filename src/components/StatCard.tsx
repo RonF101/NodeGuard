@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import Card from "@mui/material/Card";
+import CardActionArea from "@mui/material/CardActionArea";
 import CardContent from "@mui/material/CardContent";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
@@ -11,12 +12,18 @@ type StatCardProps = {
   helper: string;
   tone: string;
   icon: ReactNode;
+  href: string;
 };
 
-export function StatCard({ label, value, helper, tone, icon }: StatCardProps) {
+export function StatCard({ label, value, helper, tone, icon, href }: StatCardProps) {
   return (
-    <Card sx={{ height: "100%" }}>
-      <CardContent>
+    <Card sx={{ height: "100%", overflow: "hidden" }}>
+      <CardActionArea
+        href={href}
+        aria-label={`${label}: ${value}. ${helper}`}
+        sx={{ height: "100%", alignItems: "stretch" }}
+      >
+      <CardContent sx={{ minHeight: 154 }}>
         <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
           <Box>
             <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
@@ -44,6 +51,7 @@ export function StatCard({ label, value, helper, tone, icon }: StatCardProps) {
           {helper}
         </Typography>
       </CardContent>
+      </CardActionArea>
     </Card>
   );
 }

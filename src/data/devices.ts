@@ -1,4 +1,5 @@
 import { DeviceNode } from "@/types";
+import { demoMinutesAgo } from "@/data/demoClock";
 
 export const deviceNodes: DeviceNode[] = [
   {
@@ -7,7 +8,10 @@ export const deviceNodes: DeviceNode[] = [
     location: "Pico",
     coordinates: { x: 20, y: 52 },
     status: "Online",
-    assignedIncidentId: "NG-2026-067"
+    powerStatus: "Mains · Battery ready",
+    lastCommunication: demoMinutesAgo(1),
+    maintenanceStatus: "No open maintenance",
+    assignedIncidentId: "NG-2026-114",
   },
   {
     id: "LT-NODE-002",
@@ -15,14 +19,21 @@ export const deviceNodes: DeviceNode[] = [
     location: "Public Market",
     coordinates: { x: 56, y: 38 },
     status: "Online",
-    assignedIncidentId: "NG-2026-070"
+    powerStatus: "Mains · Battery ready",
+    lastCommunication: demoMinutesAgo(2),
+    maintenanceStatus: "No open maintenance",
+    assignedIncidentId: "NG-2026-117",
   },
   {
     id: "LT-NODE-003",
     name: "Km. 4 Alert Node",
     location: "Km. 4",
     coordinates: { x: 38, y: 28 },
-    status: "Online"
+    status: "Online",
+    powerStatus: "Solar · Battery 86%",
+    lastCommunication: demoMinutesAgo(3),
+    maintenanceStatus: "Inspection due in 12 days",
+    assignedIncidentId: "NG-2026-113",
   },
   {
     id: "LT-NODE-004",
@@ -30,7 +41,10 @@ export const deviceNodes: DeviceNode[] = [
     location: "School Area",
     coordinates: { x: 72, y: 56 },
     status: "Online",
-    assignedIncidentId: "NG-2026-068"
+    powerStatus: "Mains · Battery ready",
+    lastCommunication: demoMinutesAgo(1),
+    maintenanceStatus: "No open maintenance",
+    assignedIncidentId: "NG-2026-115",
   },
   {
     id: "LT-NODE-005",
@@ -38,14 +52,42 @@ export const deviceNodes: DeviceNode[] = [
     location: "Km. 5 Pico",
     coordinates: { x: 46, y: 62 },
     status: "Online",
-    assignedIncidentId: "NG-2026-071"
+    powerStatus: "Mains · Battery ready",
+    lastCommunication: demoMinutesAgo(2),
+    maintenanceStatus: "No open maintenance",
+    assignedIncidentId: "NG-2026-118",
   },
   {
     id: "LT-NODE-006",
     name: "Transport Terminal Alert Node",
     location: "Transport Terminal",
     coordinates: { x: 68, y: 32 },
-    status: "Maintenance",
-    assignedIncidentId: "NG-2026-069"
+    status: "Online",
+    powerStatus: "Solar · Battery 74%",
+    lastCommunication: demoMinutesAgo(4),
+    maintenanceStatus: "Preventive maintenance scheduled",
+    assignedIncidentId: "NG-2026-116",
+  },
+  {
+    id: "LT-NODE-007",
+    name: "Municipal Hall Alert Node",
+    location: "Municipal Hall Complex",
+    coordinates: { x: 52, y: 48 },
+    status: "Online",
+    powerStatus: "Mains · Battery ready",
+    lastCommunication: demoMinutesAgo(1),
+    maintenanceStatus: "No open maintenance",
+    assignedIncidentId: "NG-2026-112",
+  },
+  {
+    id: "LT-NODE-008",
+    name: "Strawberry Farm Alert Node",
+    location: "Strawberry Farm Visitor Area",
+    coordinates: { x: 28, y: 22 },
+    status: "Offline",
+    powerStatus: "No telemetry",
+    lastCommunication: demoMinutesAgo(47),
+    maintenanceStatus: "Connectivity inspection required",
+    assignedIncidentId: "NG-2026-111",
   }
 ];
