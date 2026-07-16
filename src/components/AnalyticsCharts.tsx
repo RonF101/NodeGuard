@@ -23,6 +23,8 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
 import {
   Bar,
   BarChart,
@@ -125,12 +127,12 @@ function AnalyticsSummaryCard({
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <Card sx={{ height: 380 }}>
-      <CardContent sx={{ height: "100%" }}>
+    <Card sx={{ height: { xs: 360, sm: 400 } }}>
+      <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
         <Typography variant="h6" color="secondary" sx={{ mb: 2 }}>
           {title}
         </Typography>
-        {children}
+        <Box sx={{ flexGrow: 1, minHeight: 0 }}>{children}</Box>
       </CardContent>
     </Card>
   );
@@ -227,7 +229,7 @@ function ProneAreaCard({ row }: { row: NodeAnalyticsRow }) {
     <Card sx={{ height: "100%" }}>
       <CardContent>
         <Stack spacing={1.5}>
-          <Stack direction="row" spacing={1} sx={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between", alignItems: "flex-start" }}>
             <Box>
               <Typography variant="h6" color="secondary">
                 {row.location}
@@ -256,7 +258,41 @@ function ProneAreaCard({ row }: { row: NodeAnalyticsRow }) {
 function NodeAnalyticsTable({ rows }: { rows: NodeAnalyticsRow[] }) {
   return (
     <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid rgba(36,77,58,0.08)" }}>
-      <Table>
+      <Stack spacing={1.5} sx={{ display: { xs: "flex", md: "none" }, p: 1.5 }}>
+        {rows.map((row) => {
+          const risk = riskColors[row.riskLevel];
+          return (
+            <Box component="article" key={row.deviceId} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="subtitle1" color="secondary" sx={{ fontWeight: 900 }}>{row.deviceId}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>{row.location}</Typography>
+                </Box>
+                <Chip size="small" label={row.riskLevel} sx={{ bgcolor: risk.bg, color: risk.color }} />
+              </Stack>
+              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, mt: 1.5 }}>
+                {[
+                  ["Total", row.totalIncidents],
+                  ["Confirmed", row.verified],
+                  ["False Alarms", row.falseAlarms],
+                  ["Pending", row.pending],
+                  ["Medical", row.medical],
+                  ["Security", row.security],
+                  ["Fire / Disaster", row.fireDisaster],
+                ].map(([label, value]) => (
+                  <Box key={label}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{label}</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 900 }}>{value}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5, fontWeight: 800 }}>Recommendation</Typography>
+              <Typography variant="body2">{row.recommendation}</Typography>
+            </Box>
+          );
+        })}
+      </Stack>
+      <Table sx={{ display: { xs: "none", md: "table" } }}>
         <TableHead>
           <TableRow>
             <TableCell>Device ID</TableCell>
@@ -306,6 +342,8 @@ export function AnalyticsCharts({
   incidents?: AnalyticsIncident[];
   useLatestRecordAsReference?: boolean;
 }) {
+  const theme = useTheme();
+  const compactCharts = useMediaQuery(theme.breakpoints.down("sm"));
   const [dateRange, setDateRange] = useState<DateRange>("This Week");
   const [category, setCategory] = useState<EmergencyCategory | "All">("All");
   const [node, setNode] = useState<NodeFilter>("All Nodes");
@@ -448,9 +486,9 @@ export function AnalyticsCharts({
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="Incidents by Category">
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie dataKey="value" data={incidentsByCategory} outerRadius={96} label isAnimationActive={false}>
+                <Pie dataKey="value" data={incidentsByCategory} outerRadius={compactCharts ? 72 : 96} label={!compactCharts} isAnimationActive={false}>
                   {incidentsByCategory.map((entry) => (
                     <Cell key={entry.name} fill={categoryColors[entry.name as EmergencyCategory]} />
                   ))}
@@ -463,7 +501,7 @@ export function AnalyticsCharts({
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="Incidents by Node">
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={incidentsByNode}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="deviceId" />
@@ -476,7 +514,7 @@ export function AnalyticsCharts({
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="False vs Confirmed Alarms per Device This Week">
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={validationByDevice}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="deviceId" />
@@ -492,7 +530,7 @@ export function AnalyticsCharts({
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="Incident Category Distribution per Node">
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={categoryByDevice}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="deviceId" />

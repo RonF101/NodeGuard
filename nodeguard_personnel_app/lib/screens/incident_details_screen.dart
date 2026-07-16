@@ -4,6 +4,7 @@ import '../models/incident.dart';
 import '../services/nodeguard_repository.dart';
 import '../services/operational_mode_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 import '../widgets/incident_card.dart';
 import '../widgets/map_placeholder.dart';
 import '../widgets/priority_chip.dart';
@@ -164,7 +165,7 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(_incident.id)),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: AppLayout.pagePadding(context),
         children: [
           Row(
             children: [
@@ -360,19 +361,28 @@ class _DetailRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 126,
-            child: Text(label,
-                style: const TextStyle(
-                    color: AppColors.mutedText, fontWeight: FontWeight.w800)),
-          ),
-          Expanded(
-              child: Text(value,
-                  style: const TextStyle(fontWeight: FontWeight.w700))),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 340;
+          final labelText = Text(label,
+              style: const TextStyle(
+                  color: AppColors.mutedText, fontWeight: FontWeight.w800));
+          final valueText =
+              Text(value, style: const TextStyle(fontWeight: FontWeight.w700));
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [labelText, const SizedBox(height: 3), valueText],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 126, child: labelText),
+              Expanded(child: valueText),
+            ],
+          );
+        },
       ),
     );
   }

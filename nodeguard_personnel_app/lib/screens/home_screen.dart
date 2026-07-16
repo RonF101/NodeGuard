@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/incident.dart';
 import '../models/responder.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 import '../widgets/incident_card.dart';
 import '../widgets/summary_card.dart';
 import 'incident_details_screen.dart';
@@ -44,28 +45,43 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: AppLayout.pagePadding(context),
         children: [
-          Row(
-            children: [
-              SummaryCard(
-                  label: 'Assigned Alerts',
-                  value: '${incidents.length}',
-                  icon: Icons.assignment_outlined,
-                  color: AppColors.deepGreen),
-              const SizedBox(width: 10),
-              SummaryCard(
-                  label: 'Active Response',
-                  value: '$active',
-                  icon: Icons.emergency_share_outlined,
-                  color: AppColors.orange),
-              const SizedBox(width: 10),
-              SummaryCard(
-                  label: 'Resolved Today',
-                  value: '$resolvedToday',
-                  icon: Icons.check_circle_outline,
-                  color: AppColors.successGreen),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns =
+                  AppLayout.summaryColumnCount(constraints.maxWidth);
+              final ratio = columns == 1
+                  ? 1.8
+                  : columns == 2
+                      ? 1.25
+                      : 2.4;
+              return GridView.count(
+                crossAxisCount: columns,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: ratio,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  SummaryCard(
+                      label: 'Assigned Alerts',
+                      value: '${incidents.length}',
+                      icon: Icons.assignment_outlined,
+                      color: AppColors.deepGreen),
+                  SummaryCard(
+                      label: 'Active Response',
+                      value: '$active',
+                      icon: Icons.emergency_share_outlined,
+                      color: AppColors.orange),
+                  SummaryCard(
+                      label: 'Resolved Today',
+                      value: '$resolvedToday',
+                      icon: Icons.check_circle_outline,
+                      color: AppColors.successGreen),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 18),
           Text('Assigned Alerts',

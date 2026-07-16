@@ -9,7 +9,7 @@ import Drawer from "@mui/material/Drawer";
 import Stack from "@mui/material/Stack";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
-import { Header } from "@/components/Header";
+import { appHeaderHeight, Header } from "@/components/Header";
 import { ConnectivityBar, connectivityBarHeight } from "@/components/connectivity/ConnectivityBar";
 import { ConnectivityProvider } from "@/components/connectivity/ConnectivityProvider";
 import { RealtimeRefresh } from "@/components/RealtimeRefresh";
@@ -148,7 +148,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           ModalProps={{ keepMounted: true }}
           sx={{
             display: { xs: "block", md: "none" },
-            "& .MuiDrawer-paper": { width: drawerWidth, top: 64 + connectivityBarHeight, height: `calc(100% - ${64 + connectivityBarHeight}px)` }
+            "& .MuiDrawer-paper": {
+              width: `min(${drawerWidth}px, 92vw)`,
+              maxWidth: "100%",
+              top: appHeaderHeight + connectivityBarHeight,
+              height: `calc(100% - ${appHeaderHeight + connectivityBarHeight}px)`,
+            }
           }}
         >
           <Sidebar role={operator.role} mobile onNavigate={() => setMobileOpen(false)} />
@@ -160,8 +165,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             "& .MuiDrawer-paper": {
               width: desktopDrawerWidth,
               boxSizing: "border-box",
-              top: 64 + connectivityBarHeight,
-              height: `calc(100% - ${64 + connectivityBarHeight}px)`,
+              top: appHeaderHeight + connectivityBarHeight,
+              height: `calc(100% - ${appHeaderHeight + connectivityBarHeight}px)`,
               transition: "width 180ms ease"
             }
           }}
@@ -170,10 +175,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Sidebar role={operator.role} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
         </Drawer>
       </Box>
-      <Box component="main" sx={{ flexGrow: 1, minWidth: 0, width: { md: `calc(100% - ${desktopDrawerWidth}px)` } }}>
-        <Toolbar />
+      <Box component="main" sx={{ flexGrow: 1, minWidth: 0, width: { md: `calc(100% - ${desktopDrawerWidth}px)` }, overflowX: "clip" }}>
+        <Toolbar sx={{ minHeight: `${appHeaderHeight}px !important` }} />
         <Box sx={{ height: connectivityBarHeight }} />
-        <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1500, mx: "auto" }}>{children}</Box>
+        <Box sx={{ width: "100%", p: { xs: 1.5, sm: 2, md: 3 }, maxWidth: 1500, mx: "auto" }}>{children}</Box>
       </Box>
     </Box>
     </ConnectivityProvider>

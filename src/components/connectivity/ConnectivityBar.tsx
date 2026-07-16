@@ -10,6 +10,7 @@ import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
 import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
 import { mdrrmoPalette } from "@/theme/theme";
+import { appHeaderHeight } from "@/components/Header";
 
 export const connectivityBarHeight = 48;
 
@@ -32,17 +33,17 @@ export function ConnectivityBar() {
       sx={{
         position: "fixed",
         zIndex: (theme) => theme.zIndex.drawer + 1,
-        top: 64,
+        top: appHeaderHeight,
         left: 0,
         right: 0,
         minHeight: connectivityBarHeight,
-        px: { xs: 1.5, md: 3 },
+        px: { xs: 1, sm: 1.5, md: 3 },
         bgcolor: offline ? mdrrmoPalette.readyWhite : mdrrmoPalette.setBlueSoft,
         color: mdrrmoPalette.navy,
         borderBottom: `1px solid ${mdrrmoPalette.border}`,
       }}
     >
-      <Stack direction="row" spacing={1.25} sx={{ minHeight: connectivityBarHeight, alignItems: "center" }}>
+      <Stack direction="row" spacing={{ xs: 0.5, sm: 1.25 }} sx={{ minHeight: connectivityBarHeight, alignItems: "center" }}>
         <Icon color="primary" fontSize="small" />
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Typography variant="body2" sx={{ fontWeight: 900 }} noWrap>{label}</Typography>

@@ -145,6 +145,7 @@ export default function LiveAlertsPage() {
           incidents={filteredIncidents}
           onView={setSelected}
           showVoice
+          showFilters={false}
         />
       </Stack>
       <IncidentModal

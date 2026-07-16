@@ -12,6 +12,7 @@ import '../services/local_sync_queue.dart';
 import '../services/operational_mode_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 import 'active_alerts_screen.dart';
 import 'history_screen.dart';
 import 'home_screen.dart';
@@ -385,72 +386,145 @@ class _MainShellState extends State<MainShell> {
       ),
     ];
 
-    return Scaffold(
-      body: Column(
-        children: [
-          const ConnectivityBanner(),
-          if (_isLoading || !_isBackendConfigured || _loadError != null)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              color: AppColors.readyWhite,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: Text(
-                      _loadError ??
-                          (_isLoading
-                              ? 'Loading shared NodeGuard data...'
-                              : 'Demo mode: configure Supabase dart-defines before operational deployment.'),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: AppColors.setBlueDark,
-                          fontWeight: FontWeight.w800),
-                    ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useNavigationRail =
+            constraints.maxWidth >= AppLayout.navigationRailWidth;
+        final extendedRail =
+            constraints.maxWidth >= AppLayout.extendedRailWidth;
+        final compactNavigation = constraints.maxWidth < 420;
+
+        return Scaffold(
+          body: Column(
+            children: [
+              const ConnectivityBanner(),
+              if (_isLoading || !_isBackendConfigured || _loadError != null)
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  color: AppColors.readyWhite,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _loadError ??
+                              (_isLoading
+                                  ? 'Loading shared NodeGuard data...'
+                                  : 'Demo mode: configure Supabase dart-defines before operational deployment.'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              color: AppColors.setBlueDark,
+                              fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      if (_loadError != null)
+                        TextButton(
+                          onPressed: () {
+                            setState(() => _isLoading = true);
+                            unawaited(_loadSharedData());
+                          },
+                          child: const Text('Retry'),
+                        ),
+                    ],
                   ),
-                  if (_loadError != null)
-                    TextButton(
-                      onPressed: () {
-                        setState(() => _isLoading = true);
-                        unawaited(_loadSharedData());
-                      },
-                      child: const Text('Retry'),
+                ),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (useNavigationRail)
+                      NavigationRail(
+                        extended: extendedRail,
+                        scrollable: true,
+                        selectedIndex: _selectedIndex,
+                        onDestinationSelected: (index) =>
+                            setState(() => _selectedIndex = index),
+                        labelType: extendedRail
+                            ? NavigationRailLabelType.none
+                            : NavigationRailLabelType.selected,
+                        indicatorColor: AppColors.setBlueSoft,
+                        destinations: const [
+                          NavigationRailDestination(
+                              icon: Icon(Icons.assignment_outlined),
+                              selectedIcon: Icon(Icons.assignment),
+                              label: Text('Home')),
+                          NavigationRailDestination(
+                              icon: Icon(Icons.map_outlined),
+                              selectedIcon: Icon(Icons.map),
+                              label: Text('Map')),
+                          NavigationRailDestination(
+                              icon: Icon(Icons.notifications_outlined),
+                              selectedIcon: Icon(Icons.notifications),
+                              label: Text('Alerts')),
+                          NavigationRailDestination(
+                              icon: Icon(Icons.history_outlined),
+                              selectedIcon: Icon(Icons.history),
+                              label: Text('History')),
+                          NavigationRailDestination(
+                              icon: Icon(Icons.person_outline),
+                              selectedIcon: Icon(Icons.person),
+                              label: Text('Profile')),
+                        ],
+                      ),
+                    if (useNavigationRail) const VerticalDivider(width: 1),
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, viewport) {
+                          final width =
+                              viewport.maxWidth > AppLayout.maxContentWidth
+                                  ? AppLayout.maxContentWidth
+                                  : viewport.maxWidth;
+                          return Center(
+                            child: SizedBox(
+                              width: width,
+                              height: viewport.maxHeight,
+                              child: pages[_selectedIndex],
+                            ),
+                          );
+                        },
+                      ),
                     ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          Expanded(child: pages[_selectedIndex]),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) =>
-            setState(() => _selectedIndex = index),
-        indicatorColor: AppColors.setBlueSoft,
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.assignment_outlined),
-              selectedIcon: Icon(Icons.assignment),
-              label: 'Home'),
-          NavigationDestination(
-              icon: Icon(Icons.map_outlined),
-              selectedIcon: Icon(Icons.map),
-              label: 'Map'),
-          NavigationDestination(
-              icon: Icon(Icons.notifications_outlined),
-              selectedIcon: Icon(Icons.notifications),
-              label: 'Alerts'),
-          NavigationDestination(
-              icon: Icon(Icons.history_outlined),
-              selectedIcon: Icon(Icons.history),
-              label: 'History'),
-          NavigationDestination(
-              icon: Icon(Icons.person_outline),
-              selectedIcon: Icon(Icons.person),
-              label: 'Profile'),
-        ],
-      ),
+            ],
+          ),
+          bottomNavigationBar: useNavigationRail
+              ? null
+              : NavigationBar(
+                  selectedIndex: _selectedIndex,
+                  onDestinationSelected: (index) =>
+                      setState(() => _selectedIndex = index),
+                  indicatorColor: AppColors.setBlueSoft,
+                  labelBehavior: compactNavigation
+                      ? NavigationDestinationLabelBehavior.onlyShowSelected
+                      : NavigationDestinationLabelBehavior.alwaysShow,
+                  destinations: const [
+                    NavigationDestination(
+                        icon: Icon(Icons.assignment_outlined),
+                        selectedIcon: Icon(Icons.assignment),
+                        label: 'Home'),
+                    NavigationDestination(
+                        icon: Icon(Icons.map_outlined),
+                        selectedIcon: Icon(Icons.map),
+                        label: 'Map'),
+                    NavigationDestination(
+                        icon: Icon(Icons.notifications_outlined),
+                        selectedIcon: Icon(Icons.notifications),
+                        label: 'Alerts'),
+                    NavigationDestination(
+                        icon: Icon(Icons.history_outlined),
+                        selectedIcon: Icon(Icons.history),
+                        label: 'History'),
+                    NavigationDestination(
+                        icon: Icon(Icons.person_outline),
+                        selectedIcon: Icon(Icons.person),
+                        label: 'Profile'),
+                  ],
+                ),
+        );
+      },
     );
   }
 }

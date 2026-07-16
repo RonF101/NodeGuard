@@ -17,7 +17,7 @@ export function PageHeader({ title, eyebrow, subtitle, actions }: PageHeaderProp
       spacing={2}
       sx={{ mb: 3, justifyContent: "space-between", alignItems: { xs: "stretch", sm: "center" } }}
     >
-      <Box>
+      <Box sx={{ minWidth: 0 }}>
         {eyebrow && (
           <Typography variant="overline" color="primary" sx={{ fontWeight: 900 }}>
             {eyebrow}
@@ -32,7 +32,7 @@ export function PageHeader({ title, eyebrow, subtitle, actions }: PageHeaderProp
           </Typography>
         )}
       </Box>
-      {actions}
+      {actions && <Box sx={{ width: { xs: "100%", sm: "auto" }, "& .MuiButton-root": { width: { xs: "100%", sm: "auto" } } }}>{actions}</Box>}
     </Stack>
   );
 }

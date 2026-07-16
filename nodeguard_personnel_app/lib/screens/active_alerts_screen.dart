@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/incident.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 import '../widgets/incident_card.dart';
 import 'incident_details_screen.dart';
 
@@ -20,7 +21,7 @@ class ActiveAlertsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Active Alerts')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: AppLayout.pagePadding(context),
         children: [
           Text(
             'Current Active Alerts',

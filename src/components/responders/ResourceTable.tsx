@@ -2,8 +2,10 @@
 
 import { useMemo, useState } from "react";
 import AssignmentIndIcon from "@mui/icons-material/AssignmentInd";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Paper from "@mui/material/Paper";
+import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -11,6 +13,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableSortLabel from "@mui/material/TableSortLabel";
+import Typography from "@mui/material/Typography";
 import { ResourceStatusChip } from "@/components/responders/ResourceStatusChip";
 import { ResponseResource } from "@/types";
 
@@ -61,7 +64,46 @@ export function ResourceTable({ resources, onAssign }: ResourceTableProps) {
 
   return (
     <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid rgba(36,77,58,0.08)" }}>
-      <Table>
+      <Stack spacing={1.5} sx={{ display: { xs: "flex", md: "none" }, p: 1.5 }}>
+        {sortedResources.map((resource) => {
+          const canAssign = resource.status === "Available";
+          return (
+            <Box component="article" key={resource.id} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="subtitle1" color="secondary" sx={{ fontWeight: 900 }}>{resource.id} · {resource.unitName}</Typography>
+                  <Typography variant="body2" color="primary" sx={{ fontWeight: 800 }}>{resource.type} · {resource.agency}</Typography>
+                </Box>
+                <ResourceStatusChip status={resource.status} />
+              </Stack>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1, mt: 1.5 }}>
+                {[
+                  ["Base Location", resource.baseLocation],
+                  ["Assigned Incident", resource.assignedIncident],
+                  ["Last Updated", resource.lastUpdated],
+                  ["Capacity / Notes", resource.notes],
+                ].map(([label, value]) => (
+                  <Box key={label} sx={{ minWidth: 0 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{label}</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{value}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Button
+                fullWidth
+                sx={{ mt: 1.5 }}
+                startIcon={<AssignmentIndIcon />}
+                disabled={!canAssign}
+                onClick={() => onAssign(resource)}
+              >
+                Assign to Team
+              </Button>
+            </Box>
+          );
+        })}
+        {!sortedResources.length && <Typography color="text.secondary" sx={{ p: 2, textAlign: "center" }}>No resources match the selected filters.</Typography>}
+      </Stack>
+      <Table sx={{ display: { xs: "none", md: "table" } }}>
         <TableHead>
           <TableRow>
             {resourceColumns.map((column) => (

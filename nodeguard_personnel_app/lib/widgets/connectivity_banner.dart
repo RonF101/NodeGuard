@@ -37,56 +37,18 @@ class ConnectivityBanner extends StatelessWidget {
                 color: AppColors.setBlueSoft,
                 border: Border(bottom: BorderSide(color: AppColors.border)),
               ),
-              child: Row(
-                children: [
-                  Icon(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxWidth < 360;
+                  final modeIcon = Icon(
                     offline
                         ? Icons.cloud_off_outlined
                         : low
                             ? Icons.network_check_outlined
                             : Icons.cloud_done_outlined,
                     color: AppColors.setBlueDark,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(label,
-                            style: const TextStyle(
-                                color: AppColors.navy,
-                                fontWeight: FontWeight.w900)),
-                        Text(
-                          helper,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: AppColors.mutedText, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (service.pendingCount > 0)
-                    Container(
-                      margin: const EdgeInsets.only(right: 4),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: AppColors.readyWhite,
-                        borderRadius: BorderRadius.circular(99),
-                        border: Border.all(color: AppColors.setBlue),
-                      ),
-                      child: Text(
-                        '${service.pendingCount} queued',
-                        style: const TextStyle(
-                          color: AppColors.setBlueDark,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  SizedBox(
+                  );
+                  final modeSwitch = SizedBox(
                     width: 48,
                     height: 48,
                     child: Switch.adaptive(
@@ -95,8 +57,86 @@ class ConnectivityBanner extends StatelessWidget {
                           ? null
                           : (value) => service.setLowBandwidth(value),
                     ),
-                  ),
-                ],
+                  );
+                  final queued = service.pendingCount > 0
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: AppColors.readyWhite,
+                            borderRadius: BorderRadius.circular(99),
+                            border: Border.all(color: AppColors.setBlue),
+                          ),
+                          child: Text(
+                            '${service.pendingCount} queued',
+                            style: const TextStyle(
+                              color: AppColors.setBlueDark,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        )
+                      : null;
+
+                  if (compact) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            modeIcon,
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(label,
+                                  style: const TextStyle(
+                                      color: AppColors.navy,
+                                      fontWeight: FontWeight.w900)),
+                            ),
+                            modeSwitch,
+                          ],
+                        ),
+                        Text(helper,
+                            style: const TextStyle(
+                                color: AppColors.mutedText, fontSize: 12)),
+                        if (queued != null) ...[
+                          const SizedBox(height: 6),
+                          queued,
+                        ],
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      modeIcon,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(label,
+                                style: const TextStyle(
+                                    color: AppColors.navy,
+                                    fontWeight: FontWeight.w900)),
+                            Text(
+                              helper,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: AppColors.mutedText, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (queued != null) ...[
+                        queued,
+                        const SizedBox(width: 4),
+                      ],
+                      modeSwitch,
+                    ],
+                  );
+                },
               ),
             ),
           ),

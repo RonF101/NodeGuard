@@ -166,7 +166,7 @@ export default function ReportsPage() {
           <Grid key={report.id} size={{ xs: 12, md: 6 }}>
             <Card>
               <CardContent>
-                <Stack direction="row" spacing={2} sx={{ justifyContent: "space-between" }}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { xs: "flex-start", sm: "center" }, justifyContent: "space-between" }}>
                   <Typography variant="h6" color="secondary">
                     {report.id}
                   </Typography>
@@ -185,7 +185,7 @@ export default function ReportsPage() {
                 <Button
                   variant="outlined"
                   startIcon={<VisibilityIcon />}
-                  sx={{ mt: 2 }}
+                  sx={{ mt: 2, width: { xs: "100%", sm: "auto" } }}
                   onClick={() => setSelectedReport(report)}
                 >
                   View Report

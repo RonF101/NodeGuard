@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/supabase_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 import 'main_shell.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -93,15 +94,15 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Form(
             key: _formKey,
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
+              padding: AppLayout.pagePadding(context),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      children: [
-                        Container(
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final logo = Container(
                           width: 58,
                           height: 58,
                           decoration: BoxDecoration(
@@ -110,25 +111,39 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           padding: const EdgeInsets.all(5),
                           child: Image.asset('assets/mdrrmc-logo.png'),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
+                        );
+                        final title = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'NodeGuard Personnel',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            const Text('Authorized personnel only',
+                                style: TextStyle(color: AppColors.mutedText)),
+                          ],
+                        );
+                        if (constraints.maxWidth < 280) {
+                          return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'NodeGuard Personnel',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w900),
-                              ),
-                              const Text('Authorized personnel only',
-                                  style: TextStyle(color: AppColors.mutedText)),
+                              logo,
+                              const SizedBox(height: 12),
+                              title,
                             ],
-                          ),
-                        ),
-                      ],
+                          );
+                        }
+                        return Row(
+                          children: [
+                            logo,
+                            const SizedBox(width: 12),
+                            Expanded(child: title),
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: 28),
                     TextFormField(

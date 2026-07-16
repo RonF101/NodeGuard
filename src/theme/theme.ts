@@ -53,11 +53,11 @@ export const theme = createTheme({
   },
   typography: {
     fontFamily: "Arial, Helvetica, sans-serif",
-    h1: { fontWeight: 800 },
-    h2: { fontWeight: 800 },
-    h3: { fontWeight: 800 },
-    h4: { fontWeight: 800 },
-    h5: { fontWeight: 800 },
+    h1: { fontWeight: 800, fontSize: "clamp(2rem, 7vw, 3.5rem)", lineHeight: 1.08 },
+    h2: { fontWeight: 800, fontSize: "clamp(1.8rem, 6vw, 3rem)", lineHeight: 1.1 },
+    h3: { fontWeight: 800, fontSize: "clamp(1.65rem, 5vw, 2.5rem)", lineHeight: 1.14 },
+    h4: { fontWeight: 800, fontSize: "clamp(1.45rem, 4.5vw, 2rem)", lineHeight: 1.18 },
+    h5: { fontWeight: 800, fontSize: "clamp(1.2rem, 3.5vw, 1.5rem)", lineHeight: 1.25 },
     h6: { fontWeight: 800 },
     button: { fontWeight: 700, textTransform: "none" }
   },
@@ -80,7 +80,65 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 8,
-          minHeight: 44
+          minHeight: 48
+        }
+      }
+    },
+    MuiIconButton: {
+      styleOverrides: {
+        root: {
+          minWidth: 48,
+          minHeight: 48
+        }
+      }
+    },
+    MuiCardContent: {
+      styleOverrides: {
+        root: {
+          padding: 24,
+          "&:last-child": { paddingBottom: 24 },
+          "@media (max-width:599.95px)": {
+            padding: 16,
+            "&:last-child": { paddingBottom: 16 }
+          }
+        }
+      }
+    },
+    MuiDialog: {
+      styleOverrides: {
+        paper: {
+          maxHeight: "calc(100% - 24px)",
+          margin: 12,
+          "@media (max-width:599.95px)": {
+            width: "calc(100% - 24px)",
+            maxWidth: "calc(100% - 24px)"
+          }
+        }
+      }
+    },
+    MuiDialogActions: {
+      styleOverrides: {
+        root: {
+          gap: 8,
+          flexWrap: "wrap",
+          padding: 16,
+          "@media (max-width:599.95px)": {
+            alignItems: "stretch",
+            flexDirection: "column-reverse",
+            "& > :not(style)": {
+              width: "100%",
+              margin: 0
+            }
+          }
+        }
+      }
+    },
+    MuiTableContainer: {
+      styleOverrides: {
+        root: {
+          maxWidth: "100%",
+          overflowX: "auto",
+          WebkitOverflowScrolling: "touch"
         }
       }
     },

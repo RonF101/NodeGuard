@@ -288,11 +288,14 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
                 ),
               ],
               const SizedBox(height: 14),
-              FilledButton.icon(
-                onPressed: _isSubmitting ? null : _submit,
-                icon: const Icon(Icons.send_outlined),
-                label:
-                    Text(_isSubmitting ? 'Saving Update...' : 'Submit Update'),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _isSubmitting ? null : _submit,
+                  icon: const Icon(Icons.send_outlined),
+                  label: Text(
+                      _isSubmitting ? 'Saving Update...' : 'Submit Update'),
+                ),
               ),
             ],
           ),

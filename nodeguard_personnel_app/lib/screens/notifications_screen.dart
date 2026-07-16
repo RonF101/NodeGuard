@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/mock_notifications.dart';
 import '../models/notification_item.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 import '../widgets/incident_card.dart';
 
 class NotificationsScreen extends StatelessWidget {
@@ -13,7 +14,7 @@ class NotificationsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Notifications')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: AppLayout.pagePadding(context),
         children: [
           Text('MDRRMO Dashboard Updates',
               style: Theme.of(context)

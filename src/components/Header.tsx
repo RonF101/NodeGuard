@@ -20,6 +20,8 @@ type HeaderProps = {
   onLogout: () => void;
 };
 
+export const appHeaderHeight = 64;
+
 function formatManilaTime() {
   return new Intl.DateTimeFormat("en-PH", {
     dateStyle: "medium",
@@ -55,7 +57,13 @@ export function Header({
         zIndex: (theme) => theme.zIndex.drawer + 1,
       }}
     >
-      <Toolbar sx={{ gap: 2 }}>
+      <Toolbar
+        sx={{
+          minHeight: `${appHeaderHeight}px !important`,
+          gap: { xs: 0.5, sm: 2 },
+          px: { xs: 1, sm: 2 },
+        }}
+      >
         <IconButton
           color="inherit"
           edge="start"
@@ -69,6 +77,7 @@ export function Header({
           sx={{
             width: 42,
             height: 42,
+            "@media (max-width:300px)": { display: "none" },
             borderRadius: "50%",
             bgcolor: "white",
             overflow: "hidden",
@@ -87,8 +96,11 @@ export function Header({
           />
         </Box>
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography variant="h6" noWrap>
+          <Typography variant="h6" noWrap sx={{ display: { xs: "none", sm: "block" } }}>
             NodeGuard Emergency Operations
+          </Typography>
+          <Typography variant="subtitle1" noWrap sx={{ display: { xs: "block", sm: "none" }, fontWeight: 900 }}>
+            NodeGuard
           </Typography>
           <Typography
             variant="caption"
@@ -97,18 +109,14 @@ export function Header({
             La Trinidad MDRRMO Emergency Coordination Dashboard
           </Typography>
         </Box>
-        <Stack
-          direction="row"
-          spacing={1}
-          sx={{ display: { xs: "none", sm: "flex" }, alignItems: "center" }}
-        >
-          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <Typography variant="body2" sx={{ display: { xs: "none", lg: "block" }, fontWeight: 700 }}>
             {now}
           </Typography>
           <Chip
             label={roleLabel}
             size="small"
-            sx={{ bgcolor: "rgba(255,255,255,0.14)", color: "white" }}
+            sx={{ display: { xs: "none", sm: "flex" }, bgcolor: "rgba(255,255,255,0.14)", color: "white" }}
           />
           <IconButton
             color="inherit"

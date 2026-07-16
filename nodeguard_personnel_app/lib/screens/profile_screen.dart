@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/responder.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
@@ -20,7 +21,7 @@ class ProfileScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: AppLayout.pagePadding(context),
         children: [
           Card(
             child: Padding(
@@ -75,28 +76,35 @@ class ProfileScreen extends StatelessWidget {
                   .titleMedium
                   ?.copyWith(fontWeight: FontWeight.w900)),
           const SizedBox(height: 8),
-          SegmentedButton<AvailabilityStatus>(
-            segments: const [
-              ButtonSegment(
-                  value: AvailabilityStatus.available,
-                  label: Text('Available'),
-                  icon: Icon(Icons.check_circle_outline)),
-              ButtonSegment(
-                  value: AvailabilityStatus.dispatched,
-                  label: Text('Dispatched'),
-                  icon: Icon(Icons.local_shipping_outlined)),
-              ButtonSegment(
-                  value: AvailabilityStatus.busy,
-                  label: Text('Busy'),
-                  icon: Icon(Icons.timelapse_outlined)),
-              ButtonSegment(
-                  value: AvailabilityStatus.offline,
-                  label: Text('Offline'),
-                  icon: Icon(Icons.power_settings_new)),
-            ],
-            selected: {responder.availability},
-            onSelectionChanged: (selection) =>
-                onAvailabilityChanged(selection.first),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final vertical = constraints.maxWidth < 600;
+              return SegmentedButton<AvailabilityStatus>(
+                direction: vertical ? Axis.vertical : Axis.horizontal,
+                expandedInsets: vertical ? null : EdgeInsets.zero,
+                segments: const [
+                  ButtonSegment(
+                      value: AvailabilityStatus.available,
+                      label: Text('Available'),
+                      icon: Icon(Icons.check_circle_outline)),
+                  ButtonSegment(
+                      value: AvailabilityStatus.dispatched,
+                      label: Text('Dispatched'),
+                      icon: Icon(Icons.local_shipping_outlined)),
+                  ButtonSegment(
+                      value: AvailabilityStatus.busy,
+                      label: Text('Busy'),
+                      icon: Icon(Icons.timelapse_outlined)),
+                  ButtonSegment(
+                      value: AvailabilityStatus.offline,
+                      label: Text('Offline'),
+                      icon: Icon(Icons.power_settings_new)),
+                ],
+                selected: {responder.availability},
+                onSelectionChanged: (selection) =>
+                    onAvailabilityChanged(selection.first),
+              );
+            },
           ),
           const SizedBox(height: 18),
           OutlinedButton.icon(
@@ -120,19 +128,28 @@ class _ProfileRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 134,
-            child: Text(label,
-                style: const TextStyle(
-                    color: AppColors.mutedText, fontWeight: FontWeight.w800)),
-          ),
-          Expanded(
-              child: Text(value,
-                  style: const TextStyle(fontWeight: FontWeight.w800))),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 340;
+          final labelText = Text(label,
+              style: const TextStyle(
+                  color: AppColors.mutedText, fontWeight: FontWeight.w800));
+          final valueText =
+              Text(value, style: const TextStyle(fontWeight: FontWeight.w800));
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [labelText, const SizedBox(height: 3), valueText],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 134, child: labelText),
+              Expanded(child: valueText),
+            ],
+          );
+        },
       ),
     );
   }

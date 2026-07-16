@@ -127,7 +127,7 @@ export default function SettingsPage() {
                     <Grid key={device.id} size={{ xs: 12, md: 6 }}>
                       <Card variant="outlined" sx={{ boxShadow: "none", height: "100%" }}>
                         <CardContent>
-                          <Stack direction="row" spacing={1} sx={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between", alignItems: "flex-start" }}>
                             <Box>
                               <Typography variant="h6" color="secondary">{device.name}</Typography>
                               <Typography sx={{ fontWeight: 800 }}>{device.id}</Typography>
@@ -170,7 +170,7 @@ export default function SettingsPage() {
                     <Grid key={String(label)} size={{ xs: 12, sm: 6 }}>
                       <Card variant="outlined" sx={{ boxShadow: "none" }}>
                         <CardContent>
-                          <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { xs: "flex-start", sm: "center" }, justifyContent: "space-between" }}>
                             <Typography sx={{ fontWeight: 800 }}>{String(label)}</Typography>
                             <Chip label={ready ? "Configured" : "Not configured"} color={ready ? "success" : "default"} />
                           </Stack>

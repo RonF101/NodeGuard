@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -20,6 +21,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusChip } from "@/components/StatusChip";
@@ -153,7 +155,36 @@ export default function UsersPage() {
       />
       <Card>
         <CardContent>
-          <TableContainer component={Paper} elevation={0}>
+          <Stack spacing={1.5} sx={{ display: { xs: "flex", md: "none" } }}>
+            {users.map((user) => (
+              <Box component="article" key={user.id} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle1" color="secondary" sx={{ fontWeight: 900 }}>{user.name}</Typography>
+                    <Typography variant="body2" color="text.secondary">{user.email}</Typography>
+                  </Box>
+                  <StatusChip status={user.status} />
+                </Stack>
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1, mt: 1.5 }}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Role</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 800 }}>{user.role}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Last Active</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 800 }}>{user.lastActive}</Typography>
+                  </Box>
+                </Box>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1.5 }}>
+                  <Button fullWidth variant="outlined" onClick={() => openEdit(user)}>Edit Role</Button>
+                  <Button fullWidth color={user.status === "Active" ? "error" : "success"} variant="outlined" onClick={() => void toggleAccount(user)}>
+                    {user.status === "Active" ? "Disable" : "Enable"}
+                  </Button>
+                </Stack>
+              </Box>
+            ))}
+          </Stack>
+          <TableContainer component={Paper} elevation={0} sx={{ display: { xs: "none", md: "block" } }}>
             <Table>
               <TableHead>
                 <TableRow>

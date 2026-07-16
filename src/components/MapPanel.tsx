@@ -139,7 +139,7 @@ export function MapPanel() {
             <Box
               sx={{
                 position: "relative",
-                height: { xs: 420, md: 560 },
+                height: { xs: "clamp(300px, 64vh, 420px)", md: 560 },
                 overflow: "hidden",
                 borderRadius: 2,
                 border: `1px solid ${mdrrmoPalette.cream}`,
@@ -168,8 +168,9 @@ export function MapPanel() {
                 useFlexGap
                 sx={{
                   position: "absolute",
-                  left: 16,
-                  bottom: 16,
+                  left: { xs: 8, sm: 16 },
+                  right: { xs: 8, sm: "auto" },
+                  bottom: { xs: 8, sm: 16 },
                   flexWrap: "wrap",
                   bgcolor: "rgba(255,255,255,0.86)",
                   borderRadius: 1,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/incident.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 import '../widgets/incident_card.dart';
 import '../widgets/priority_chip.dart';
 import '../widgets/status_chip.dart';
@@ -41,7 +42,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Incident History')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: AppLayout.pagePadding(context),
         children: [
           Text('Handled Incidents',
               style: Theme.of(context)
@@ -49,44 +50,76 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   .titleLarge
                   ?.copyWith(fontWeight: FontWeight.w900)),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              DropdownButton<String>(
-                value: _dateFilter,
-                items: const [
-                  DropdownMenuItem(value: 'All', child: Text('All Dates')),
-                  DropdownMenuItem(value: 'Today', child: Text('Today')),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 720
+                  ? 3
+                  : constraints.maxWidth >= 440
+                      ? 2
+                      : 1;
+              final width =
+                  (constraints.maxWidth - ((columns - 1) * 8)) / columns;
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  SizedBox(
+                    width: width,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _dateFilter,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Date'),
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'All', child: Text('All Dates')),
+                        DropdownMenuItem(value: 'Today', child: Text('Today')),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _dateFilter = value ?? 'All'),
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: DropdownButtonFormField<IncidentCategory?>(
+                      initialValue: _categoryFilter,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Category'),
+                      items: [
+                        const DropdownMenuItem<IncidentCategory?>(
+                            value: null, child: Text('All Categories')),
+                        ...IncidentCategory.values.map((category) =>
+                            DropdownMenuItem(
+                                value: category,
+                                child: Text(category.label,
+                                    overflow: TextOverflow.ellipsis))),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _categoryFilter = value),
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: DropdownButtonFormField<IncidentStatus?>(
+                      initialValue: _statusFilter,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Status'),
+                      items: const [
+                        DropdownMenuItem<IncidentStatus?>(
+                            value: null, child: Text('All Statuses')),
+                        DropdownMenuItem(
+                            value: IncidentStatus.resolved,
+                            child: Text('Resolved')),
+                        DropdownMenuItem(
+                            value: IncidentStatus.closed,
+                            child: Text('Closed')),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _statusFilter = value),
+                    ),
+                  ),
                 ],
-                onChanged: (value) =>
-                    setState(() => _dateFilter = value ?? 'All'),
-              ),
-              DropdownButton<IncidentCategory?>(
-                value: _categoryFilter,
-                hint: const Text('Category'),
-                items: [
-                  const DropdownMenuItem<IncidentCategory?>(
-                      value: null, child: Text('All Categories')),
-                  ...IncidentCategory.values.map((category) => DropdownMenuItem(
-                      value: category, child: Text(category.label))),
-                ],
-                onChanged: (value) => setState(() => _categoryFilter = value),
-              ),
-              DropdownButton<IncidentStatus?>(
-                value: _statusFilter,
-                hint: const Text('Status'),
-                items: const [
-                  DropdownMenuItem<IncidentStatus?>(
-                      value: null, child: Text('All Statuses')),
-                  DropdownMenuItem(
-                      value: IncidentStatus.resolved, child: Text('Resolved')),
-                  DropdownMenuItem(
-                      value: IncidentStatus.closed, child: Text('Closed')),
-                ],
-                onChanged: (value) => setState(() => _statusFilter = value),
-              ),
-            ],
+              );
+            },
           ),
           const SizedBox(height: 12),
           if (completed.isEmpty)

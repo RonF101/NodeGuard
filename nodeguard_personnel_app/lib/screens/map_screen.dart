@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/mock_locations.dart';
 import '../models/incident.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_layout.dart';
 import '../services/operational_mode_service.dart';
 import '../widgets/map_placeholder.dart';
 import '../widgets/status_chip.dart';
@@ -35,7 +36,7 @@ class _MapScreenState extends State<MapScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Location Map')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: AppLayout.pagePadding(context),
         children: [
           MapPlaceholder(incident: incident),
           const SizedBox(height: 14),
@@ -153,30 +154,46 @@ class _IncidentLocationCard extends StatelessWidget {
             Text(incident.coordinates,
                 style: const TextStyle(color: AppColors.mutedText)),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onOpenRoute,
-                    icon: const Icon(Icons.route_outlined),
-                    label: const Text('Open Route'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: onMarkEnRoute,
-                    icon: const Icon(Icons.directions_car_outlined),
-                    label: const Text('Mark En Route'),
-                  ),
-                ),
-              ],
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 420;
+                final openRoute = OutlinedButton.icon(
+                  onPressed: onOpenRoute,
+                  icon: const Icon(Icons.route_outlined),
+                  label: const Text('Open Route'),
+                );
+                final markEnRoute = FilledButton.icon(
+                  onPressed: onMarkEnRoute,
+                  icon: const Icon(Icons.directions_car_outlined),
+                  label: const Text('Mark En Route'),
+                );
+                if (compact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      openRoute,
+                      const SizedBox(height: 8),
+                      markEnRoute,
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: openRoute),
+                    const SizedBox(width: 10),
+                    Expanded(child: markEnRoute),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.of(context).maybePop(),
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Back to Incident'),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Back to Incident'),
+              ),
             ),
           ],
         ),

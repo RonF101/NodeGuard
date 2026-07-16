@@ -4,8 +4,10 @@
 
 html,
 body {
+  width: 100%;
   max-width: 100vw;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 body {
@@ -16,4 +18,29 @@ body {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+td,
+th {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 360px) {
+  body {
+    font-size: 0.9375rem;
+  }
 }

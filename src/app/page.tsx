@@ -83,7 +83,7 @@ export default function LoginPage() {
         bgcolor: "background.default",
         display: "grid",
         placeItems: "center",
-        p: 3,
+        p: { xs: 1.5, sm: 3 },
         backgroundImage:
           "linear-gradient(125deg, rgba(244,127,53,0.18) 0%, rgba(247,214,194,0.65) 35%, rgba(245,246,247,1) 36%, rgba(232,242,237,0.9) 100%)"
       }}
@@ -91,10 +91,10 @@ export default function LoginPage() {
       <Grid container spacing={3} sx={{ width: "100%", maxWidth: 1120, alignItems: "stretch" }}>
         <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: "100%", bgcolor: mdrrmoPalette.darkGreen, color: "white" }}>
-            <CardContent sx={{ p: { xs: 3, md: 5 }, height: "100%" }}>
+            <CardContent sx={{ p: { xs: 2, sm: 3, md: 5 }, height: "100%" }}>
               <Stack sx={{ height: "100%", justifyContent: "space-between" }} spacing={5}>
                 <Box>
-                  <Stack direction="row" spacing={2} sx={{ mb: 4, alignItems: "center" }}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 4, alignItems: { xs: "flex-start", sm: "center" } }}>
                     <Badge color="primary" variant="dot">
                       <Box
                         sx={{
@@ -149,7 +149,7 @@ export default function LoginPage() {
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: "100%" }}>
-            <CardContent sx={{ p: { xs: 3, md: 5 } }}>
+            <CardContent sx={{ p: { xs: 2, sm: 3, md: 5 } }}>
               <BrandLogo />
               <Typography variant="h4" color="secondary" sx={{ mt: 4 }}>
                 Personnel Login
