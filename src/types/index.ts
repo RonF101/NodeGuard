@@ -15,6 +15,7 @@ export type IncidentPriority = "Critical" | "High" | "Moderate" | "Low";
 
 export type ResponderStatus =
   | "Available"
+  | "Unavailable"
   | "Dispatched"
   | "En Route"
   | "On Scene"

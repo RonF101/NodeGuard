@@ -8,26 +8,37 @@ import { Incident, Responder } from "@/types";
 type DashboardIncidentPanelProps = {
   incidents: Incident[];
   responders: Responder[];
+  onIncidentUpdated: (incident: Incident) => void;
+  onRespondersUpdated: (responders: Responder[]) => void;
 };
 
 export function DashboardIncidentPanel({
   incidents,
   responders,
+  onIncidentUpdated,
+  onRespondersUpdated,
 }: DashboardIncidentPanelProps) {
   const [selected, setSelected] = useState<Incident | null>(null);
+  const displayedIncident = selected
+    ? incidents.find((incident) => incident.id === selected.id) ?? selected
+    : null;
+
+  const handleIncidentUpdated = (updatedIncident: Incident) => {
+    setSelected(updatedIncident);
+    onIncidentUpdated(updatedIncident);
+  };
 
   return (
     <>
       <IncidentTable incidents={incidents} onView={setSelected} />
       <IncidentModal
-        key={selected?.id ?? "dashboard-incident-modal"}
-        incident={selected}
-        open={Boolean(selected)}
+        key={displayedIncident?.id ?? "dashboard-incident-modal"}
+        incident={displayedIncident}
+        open={Boolean(displayedIncident)}
         responders={responders}
         onClose={() => setSelected(null)}
-        onAssigned={() =>
-          window.dispatchEvent(new CustomEvent("nodeguard:realtime-change"))
-        }
+        onIncidentUpdated={handleIncidentUpdated}
+        onRespondersUpdated={onRespondersUpdated}
       />
     </>
   );

@@ -79,7 +79,10 @@ export default function RespondersPage() {
   }, []);
 
   const activeIncidents = useMemo(
-    () => incidentItems.filter((incident) => !["Resolved", "Closed", "False Alert"].includes(incident.status)),
+    () =>
+      incidentItems.filter((incident) =>
+        ["Verified", "Dispatched", "Responding", "On Scene"].includes(incident.status),
+      ),
     [incidentItems]
   );
 
@@ -108,7 +111,7 @@ export default function RespondersPage() {
 
   const availableResponders = responders.filter((responder) => responder.availability === "Available").length;
   const activeResponders = responders.filter((responder) =>
-    ["En Route", "On Scene", "Responding", "Busy"].includes(responder.availability)
+    responder.availability === "Unavailable"
   ).length;
   const availableAmbulances = resources.filter(
     (resource) => resource.type === "Ambulance" && resource.status === "Available"
@@ -130,6 +133,9 @@ export default function RespondersPage() {
 
     if (assignmentTarget.kind === "responder") {
       if (!selectedIncident) return;
+      const incidentBeforeAssignment = incidentItems.find(
+        (incident) => incident.id === selectedIncident,
+      );
       setIsAssigning(true);
       const response = await authorizedFetch("/api/assign-responder", {
         method: "POST",
@@ -148,10 +154,19 @@ export default function RespondersPage() {
           responder.id === assignmentTarget.id
             ? {
                 ...responder,
-                availability: "Busy",
+                availability: "Unavailable",
                 currentAssignment: selectedIncident,
                 lastStatusUpdate: "Just now"
               }
+            : incidentBeforeAssignment?.assignedResponder !== "Unassigned" &&
+                responder.name === incidentBeforeAssignment?.assignedResponder &&
+                responder.currentAssignment === selectedIncident
+              ? {
+                  ...responder,
+                  availability: "Available",
+                  currentAssignment: "None",
+                  lastStatusUpdate: "Just now",
+                }
             : responder
         )
       );
@@ -226,7 +241,7 @@ export default function RespondersPage() {
             <ResponderSummaryCard
               label="Active Responders"
               value={activeResponders}
-              helper="Busy, en route, on scene, or responding"
+              helper="Assigned to active incidents"
               icon={<ReportProblemIcon />}
               tone={mdrrmoPalette.setBlue}
             />

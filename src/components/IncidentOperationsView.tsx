@@ -44,6 +44,11 @@ export function IncidentOperationsView({ mode }: IncidentOperationsViewProps) {
       ]);
       setItems(nextIncidents);
       setResponders(nextResponders);
+      setSelected((current) =>
+        current
+          ? nextIncidents.find((incident) => incident.id === current.id) ?? current
+          : null,
+      );
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load incident operations.");
@@ -68,6 +73,15 @@ export function IncidentOperationsView({ mode }: IncidentOperationsViewProps) {
     }
     return items;
   }, [activeScope, items, mode]);
+
+  const handleIncidentUpdated = useCallback((updatedIncident: Incident) => {
+    setItems((current) =>
+      current.map((incident) =>
+        incident.id === updatedIncident.id ? updatedIncident : incident,
+      ),
+    );
+    setSelected(updatedIncident);
+  }, []);
 
   return (
     <AppShell>
@@ -96,7 +110,8 @@ export function IncidentOperationsView({ mode }: IncidentOperationsViewProps) {
         open={Boolean(selected)}
         responders={responders}
         onClose={() => setSelected(null)}
-        onAssigned={loadIncidents}
+        onIncidentUpdated={handleIncidentUpdated}
+        onRespondersUpdated={setResponders}
       />
     </AppShell>
   );

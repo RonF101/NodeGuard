@@ -141,7 +141,18 @@ export default function DashboardPage() {
               </Typography>
             </Box>
           </Stack>
-          <DashboardIncidentPanel incidents={incidentQueue} responders={responders} />
+          <DashboardIncidentPanel
+            incidents={incidentQueue}
+            responders={responders}
+            onIncidentUpdated={(updatedIncident) =>
+              setIncidents((current) =>
+                current.map((incident) =>
+                  incident.id === updatedIncident.id ? updatedIncident : incident,
+                ),
+              )
+            }
+            onRespondersUpdated={setResponders}
+          />
         </CardContent>
       </Card>
     </AppShell>

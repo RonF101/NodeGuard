@@ -221,6 +221,7 @@ export type IncidentAction =
   | "false-alert"
   | "dispatch"
   | "reassign"
+  | "remove-assignment"
   | "start-response"
   | "mark-on-scene"
   | "resolve"
@@ -233,11 +234,11 @@ export function getValidIncidentActions(incident: Incident): IncidentAction[] {
     case "Verified":
       return ["dispatch", "false-alert"];
     case "Dispatched":
-      return ["reassign", "start-response", "mark-on-scene"];
+      return ["reassign", "remove-assignment", "start-response", "mark-on-scene"];
     case "Responding":
-      return ["reassign", "mark-on-scene", "resolve"];
+      return ["reassign", "remove-assignment", "mark-on-scene", "resolve"];
     case "On Scene":
-      return ["reassign", "resolve"];
+      return ["reassign", "remove-assignment", "resolve"];
     case "Resolved":
       return ["close"];
     case "Closed":

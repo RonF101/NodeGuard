@@ -17,9 +17,11 @@ import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
 import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import VolumeUpIcon from "@mui/icons-material/VolumeUp";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
+import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
+import PersonRemoveOutlinedIcon from "@mui/icons-material/PersonRemoveOutlined";
 import ReportProblemIcon from "@mui/icons-material/ReportProblem";
 import MapIcon from "@mui/icons-material/Map";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Incident, Responder, ValidationStatus } from "@/types";
 import { StatusChip } from "@/components/StatusChip";
 import { PriorityChip } from "@/components/PriorityChip";
@@ -37,6 +39,7 @@ type SafeAction =
   | "activate-buzzer"
   | "deactivate-buzzer"
   | "false-alarm"
+  | "remove-assignment"
   | "start-response"
   | "mark-on-scene"
   | "resolve"
@@ -48,7 +51,8 @@ type IncidentModalProps = {
   open: boolean;
   responders?: Responder[];
   onClose: () => void;
-  onAssigned?: () => void;
+  onIncidentUpdated?: (incident: Incident) => void;
+  onRespondersUpdated?: (responders: Responder[]) => void;
 };
 
 export function IncidentModal({
@@ -56,7 +60,8 @@ export function IncidentModal({
   open,
   responders = [],
   onClose,
-  onAssigned,
+  onIncidentUpdated,
+  onRespondersUpdated,
 }: IncidentModalProps) {
   const [selectedResponder, setSelectedResponder] = useState("");
   const [isAssigning, setIsAssigning] = useState(false);
@@ -64,6 +69,7 @@ export function IncidentModal({
   const [assignmentMessage, setAssignmentMessage] = useState<string | null>(
     null,
   );
+  const [assignmentError, setAssignmentError] = useState(false);
   const [buzzerMessage, setBuzzerMessage] = useState<string | null>(null);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -71,19 +77,27 @@ export function IncidentModal({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [safeAction, setSafeAction] = useState<SafeAction>(null);
   const [draftSaved, setDraftSaved] = useState(false);
+  const validationInFlight = useRef(false);
   const { online, lowBandwidth } = useConnectivity();
   const validActions = incident ? getValidIncidentActions(incident) : [];
   const canAssign = validActions.includes("dispatch") || validActions.includes("reassign");
+  const canCorrectValidation = Boolean(
+    incident &&
+      ["Pending Verification", "Verified", "False Alert"].includes(incident.status),
+  );
+  const isVerified = incident?.validationStatus === "Confirmed";
+  const isFalseAlert = incident?.validationStatus === "False Alarm";
 
   const assignableResponders = useMemo(
-    () =>
-      responders.filter((responder) =>
-        ["Available", "Dispatched", "Busy"].includes(responder.availability),
-      ),
+    () => responders.filter((responder) => responder.availability === "Available"),
     [responders],
   );
 
   const selectedResponderOption = assignableResponders.find((item) => item.id === selectedResponder) ?? null;
+  const assignedResponderProfile =
+    incident?.assignedResponder && incident.assignedResponder !== "Unassigned"
+      ? responders.find((responder) => responder.name === incident.assignedResponder) ?? null
+      : null;
   const draftKey = incident ? `nodeguard.dispatch-draft:${incident.id}` : "";
 
   useEffect(() => {
@@ -101,27 +115,126 @@ export function IncidentModal({
   if (!incident) return null;
 
   const assignResponder = async () => {
-    if (!selectedResponder) return;
-    setIsAssigning(true);
-    setAssignmentMessage(null);
-    const response = await authorizedFetch("/api/assign-responder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        responderId: selectedResponder,
-        incidentId: incident.id,
-      }),
-    });
-    const result = (await response.json()) as { ok: boolean; reason?: string };
-    setIsAssigning(false);
-    if (!result.ok) {
-      setAssignmentMessage(result.reason ?? "Assignment failed.");
+    if (!selectedResponderOption || selectedResponderOption.availability !== "Available") {
+      setAssignmentError(true);
+      setAssignmentMessage(
+        "That responder/team is unavailable. Select a team marked Available.",
+      );
       return;
     }
-    setAssignmentMessage("Responder assigned and notified.");
-    window.localStorage.removeItem(draftKey);
-    setDraftSaved(false);
-    onAssigned?.();
+    setIsAssigning(true);
+    setAssignmentError(false);
+    setAssignmentMessage(null);
+    try {
+      const response = await authorizedFetch("/api/assign-responder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          responderId: selectedResponder,
+          incidentId: incident.id,
+        }),
+      });
+      const result = (await response.json()) as { ok: boolean; reason?: string };
+      if (!result.ok) {
+        setAssignmentError(true);
+        setAssignmentMessage(result.reason ?? "Assignment failed.");
+        return;
+      }
+
+      const previousResponderName = incident.assignedResponder;
+      const updatedIncident: Incident = {
+        ...incident,
+        assignedResponder: selectedResponderOption.name,
+        status: "Dispatched",
+      };
+      const updatedResponders = responders.map((responder) => {
+        if (responder.id === selectedResponderOption.id) {
+          return {
+            ...responder,
+            availability: "Unavailable" as const,
+            currentAssignment: incident.id,
+            lastStatusUpdate: new Date().toISOString(),
+          };
+        }
+        if (
+          previousResponderName !== "Unassigned" &&
+          responder.name === previousResponderName &&
+          responder.currentAssignment === incident.id
+        ) {
+          return {
+            ...responder,
+            availability: "Available" as const,
+            currentAssignment: "None",
+            lastStatusUpdate: new Date().toISOString(),
+          };
+        }
+        return responder;
+      });
+
+      setAssignmentMessage(
+        `${selectedResponderOption.name} assigned. The team is now unavailable for other incidents.`,
+      );
+      window.localStorage.removeItem(draftKey);
+      setSelectedResponder("");
+      setDraftSaved(false);
+      onIncidentUpdated?.(updatedIncident);
+      onRespondersUpdated?.(updatedResponders);
+    } catch {
+      setAssignmentError(true);
+      setAssignmentMessage("Assignment failed because the dispatch service could not be reached.");
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  const removeAssignment = async () => {
+    if (incident.assignedResponder === "Unassigned") return;
+    setIsAssigning(true);
+    setAssignmentError(false);
+    setAssignmentMessage(null);
+    try {
+      const response = await authorizedFetch("/api/remove-responder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ incidentId: incident.id }),
+      });
+      const result = (await response.json()) as { ok: boolean; reason?: string };
+      if (!result.ok) {
+        setAssignmentError(true);
+        setAssignmentMessage(result.reason ?? "Unable to remove the team assignment.");
+        return;
+      }
+
+      const removedResponderName = incident.assignedResponder;
+      const updatedIncident: Incident = {
+        ...incident,
+        assignedResponder: "Unassigned",
+        status: "Verified",
+        validationStatus: "Confirmed",
+      };
+      const updatedResponders = responders.map((responder) =>
+        responder.name === removedResponderName &&
+        responder.currentAssignment === incident.id
+          ? {
+              ...responder,
+              availability: "Available" as const,
+              currentAssignment: "None",
+              lastStatusUpdate: new Date().toISOString(),
+            }
+          : responder,
+      );
+
+      setAssignmentMessage(
+        `${removedResponderName} was formally removed and is available for reassignment.`,
+      );
+      onIncidentUpdated?.(updatedIncident);
+      onRespondersUpdated?.(updatedResponders);
+    } catch {
+      setAssignmentError(true);
+      setAssignmentMessage("The team assignment could not be removed because the service is unavailable.");
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
   const toggleBuzzer = async () => {
@@ -144,7 +257,11 @@ export function IncidentModal({
         ? "Buzzer activation command sent."
         : "Buzzer deactivation command sent.",
     );
-    onAssigned?.();
+    onIncidentUpdated?.({
+      ...incident,
+      buzzerActive: nextActive,
+      buzzerUpdatedAt: new Date().toISOString(),
+    });
   };
 
   const safeDialogCopy = (() => {
@@ -175,7 +292,14 @@ export function IncidentModal({
           title: "Mark alert as false alarm",
           summary: `This removes ${incident.id} from the active response queue. Confirm that verification is complete.`,
           confirmLabel: "Mark False Alarm",
-          tone: "set" as const,
+          tone: "critical" as const,
+        };
+      case "remove-assignment":
+        return {
+          title: "Remove response-team assignment",
+          summary: `Formally remove ${incident.assignedResponder} from ${incident.id}. The incident will return to Verified and await a new dispatch.`,
+          confirmLabel: "Remove Assignment",
+          tone: "critical" as const,
         };
       case "start-response":
         return { title: "Start active response", summary: `Confirm that the dispatched team is actively responding to ${incident.id}.`, confirmLabel: "Mark Responding", tone: "set" as const };
@@ -196,6 +320,7 @@ export function IncidentModal({
     if (action === "assign") await assignResponder();
     if (action === "activate-buzzer" || action === "deactivate-buzzer") await toggleBuzzer();
     if (action === "false-alarm") await validateAlert("False Alarm");
+    if (action === "remove-assignment") await removeAssignment();
     if (action === "start-response") await updateWorkflowStatus("Responding");
     if (action === "mark-on-scene") await updateWorkflowStatus("On Scene");
     if (action === "resolve") await updateWorkflowStatus("Resolved");
@@ -203,21 +328,46 @@ export function IncidentModal({
   };
 
   const validateAlert = async (validationStatus: ValidationStatus) => {
-    setIsValidating(true);
-    setValidationMessage(null);
-    const response = await authorizedFetch("/api/validate-incident", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ incidentId: incident.id, validationStatus }),
-    });
-    const result = (await response.json()) as { ok: boolean; reason?: string };
-    setIsValidating(false);
-    if (!result.ok) {
-      setValidationMessage(result.reason ?? "Alert validation failed.");
+    if (validationInFlight.current || incident.validationStatus === validationStatus) {
+      setValidationMessage(
+        validationStatus === "Confirmed"
+          ? "This alert is already verified."
+          : "This incident is already marked as a false alert.",
+      );
       return;
     }
-    setValidationMessage(`Alert marked ${validationStatus.toLowerCase()}.`);
-    onAssigned?.();
+    validationInFlight.current = true;
+    setIsValidating(true);
+    setValidationMessage(null);
+    try {
+      const response = await authorizedFetch("/api/validate-incident", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ incidentId: incident.id, validationStatus }),
+      });
+      const result = (await response.json()) as { ok: boolean; reason?: string };
+      if (!result.ok) {
+        setValidationMessage(result.reason ?? "Alert validation failed.");
+        return;
+      }
+
+      const updatedIncident: Incident = {
+        ...incident,
+        validationStatus,
+        status: validationStatus === "Confirmed" ? "Verified" : "False Alert",
+      };
+      setValidationMessage(
+        validationStatus === "Confirmed"
+          ? "Alert verified. Verify Alert is now disabled; False Alert remains available for correction."
+          : "Incident marked as a false alert. False Alert is now disabled; Verify Alert remains available for correction.",
+      );
+      onIncidentUpdated?.(updatedIncident);
+    } catch {
+      setValidationMessage("Alert validation failed because the service could not be reached.");
+    } finally {
+      validationInFlight.current = false;
+      setIsValidating(false);
+    }
   };
 
   const updateWorkflowStatus = async (
@@ -225,19 +375,45 @@ export function IncidentModal({
   ) => {
     setIsUpdatingStatus(true);
     setStatusMessage(null);
-    const response = await authorizedFetch("/api/update-incident-status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ incidentId: incident.id, status }),
-    });
-    const result = (await response.json()) as { ok: boolean; reason?: string };
-    setIsUpdatingStatus(false);
-    if (!result.ok) {
-      setStatusMessage(result.reason ?? "Status update failed.");
-      return;
+    try {
+      const response = await authorizedFetch("/api/update-incident-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ incidentId: incident.id, status }),
+      });
+      const result = (await response.json()) as { ok: boolean; reason?: string };
+      if (!result.ok) {
+        setStatusMessage(result.reason ?? "Status update failed.");
+        return;
+      }
+
+      const updatedIncident: Incident = { ...incident, status };
+      onIncidentUpdated?.(updatedIncident);
+      if (status === "Resolved") {
+        onRespondersUpdated?.(
+          responders.map((responder) =>
+            responder.name === incident.assignedResponder &&
+            responder.currentAssignment === incident.id
+              ? {
+                  ...responder,
+                  availability: "Available" as const,
+                  currentAssignment: "None",
+                  lastStatusUpdate: new Date().toISOString(),
+                }
+              : responder,
+          ),
+        );
+      }
+      setStatusMessage(
+        status === "Resolved"
+          ? "Incident resolved. The assigned responder/team is available again."
+          : `Incident marked ${status.toLowerCase()}.`,
+      );
+    } catch {
+      setStatusMessage("Status update failed because the workflow service could not be reached.");
+    } finally {
+      setIsUpdatingStatus(false);
     }
-    setStatusMessage(`Incident marked ${status.toLowerCase()}.`);
-    onAssigned?.();
   };
 
   const mapQuery = incident.coordinates || incident.approximateAddress || incident.location;
@@ -309,28 +485,95 @@ export function IncidentModal({
                   </Typography>
                 )}
               </Stack>
-              {(validActions.includes("verify") || validActions.includes("false-alert")) && (
+              {canCorrectValidation && (
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                  {validActions.includes("verify") && <Button
+                  <Button
                     color="success"
                     startIcon={<FactCheckIcon />}
-                    disabled={isValidating}
+                    disabled={isValidating || isVerified || !online}
                     onClick={() => validateAlert("Confirmed")}
                   >
                     Verify Alert
-                  </Button>}
-                  {validActions.includes("false-alert") && <Button
-                    color="primary"
+                  </Button>
+                  <Button
+                    color="error"
                     variant="outlined"
                     startIcon={<ReportProblemIcon />}
-                    disabled={isValidating}
+                    disabled={isValidating || isFalseAlert || !online}
                     onClick={() => setSafeAction("false-alarm")}
                   >
                     Mark as False Alert
-                  </Button>}
+                  </Button>
                 </Stack>
               )}
             </Stack>
+            {!canCorrectValidation && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                Verification is locked because dispatch or response activity has already started.
+              </Typography>
+            )}
+          </Grid>
+          {incident.assignedResponder !== "Unassigned" && (
+            <Grid size={{ xs: 12 }}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1.5}
+                sx={{
+                  alignItems: { xs: "stretch", sm: "center" },
+                  justifyContent: "space-between",
+                  border: "1px solid",
+                  borderColor: "divider",
+                  borderRadius: 1,
+                  p: 1.5,
+                  bgcolor: "rgba(25, 103, 210, 0.04)",
+                }}
+              >
+                <Stack direction="row" spacing={1.25} sx={{ alignItems: "flex-start" }}>
+                  <GroupsOutlinedIcon color="primary" />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                      Current Response Assignment
+                    </Typography>
+                    <Typography variant="body1" sx={{ fontWeight: 900 }}>
+                      {incident.assignedResponder}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {assignedResponderProfile
+                        ? `${assignedResponderProfile.agency} · ${assignedResponderProfile.role}`
+                        : "MDRRMO responder or partner unit"}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {["Dispatched", "Responding", "On Scene"].includes(incident.status)
+                        ? `Assigned to ${incident.id} · unavailable for another dispatch until resolved or formally removed`
+                        : `Assignment retained in the incident record · responder/team released from active duty`}
+                    </Typography>
+                  </Box>
+                </Stack>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { sm: "center" } }}>
+                  <StatusChip
+                    status={
+                      ["Dispatched", "Responding", "On Scene"].includes(incident.status)
+                        ? "Unavailable"
+                        : assignedResponderProfile?.availability ?? "Available"
+                    }
+                  />
+                  {validActions.includes("remove-assignment") && (
+                    <Button
+                      color="error"
+                      variant="outlined"
+                      startIcon={<PersonRemoveOutlinedIcon />}
+                      disabled={isAssigning || !online}
+                      onClick={() => setSafeAction("remove-assignment")}
+                    >
+                      Remove Assignment
+                    </Button>
+                  )}
+                </Stack>
+              </Stack>
+            </Grid>
+          )}
+          <Grid size={{ xs: 12 }}>
+            <Divider />
           </Grid>
           {validActions.some((action) => ["start-response", "mark-on-scene", "resolve", "close"].includes(action)) && (
             <Grid size={{ xs: 12 }}>
@@ -519,6 +762,11 @@ export function IncidentModal({
                   renderInput={(params) => <TextField {...params} label="Search responder or team" />}
                 />
               )}
+              {canAssign && (
+                <Typography variant="caption" color="text.secondary">
+                  Only responders and teams marked Available are listed. {responders.length - assignableResponders.length} unavailable or offline option{responders.length - assignableResponders.length === 1 ? "" : "s"} hidden.
+                </Typography>
+              )}
               {draftSaved && canAssign && (
                 <Typography variant="caption" color="primary" sx={{ fontWeight: 800 }}>Dispatch draft saved locally on this device.</Typography>
               )}
@@ -526,16 +774,9 @@ export function IncidentModal({
                 <Alert severity="info">Offline · Local Sync. Drafts remain available, but dispatch commands wait for a network connection.</Alert>
               )}
               {assignmentMessage && (
-                <Typography
-                  variant="body2"
-                  color={
-                    assignmentMessage.includes("failed")
-                      ? "error"
-                      : "success.main"
-                  }
-                >
+                <Alert severity={assignmentError ? "error" : "success"}>
                   {assignmentMessage}
-                </Typography>
+                </Alert>
               )}
             </Stack>
           </Grid>

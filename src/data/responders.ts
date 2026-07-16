@@ -8,7 +8,7 @@ export const responders: Responder[] = [
     agency: "MDRRMO Rescue Unit",
     role: "Rescue Team Lead",
     contactNumber: "Internal Radio CH-01",
-    availability: "Dispatched",
+    availability: "Unavailable",
     currentAssignment: "NG-2026-115",
     lastStatusUpdate: demoMinutesAgo(31)
   },
@@ -18,7 +18,7 @@ export const responders: Responder[] = [
     agency: "EMS",
     role: "Medical Response Team",
     contactNumber: "0910-320-7446",
-    availability: "Responding",
+    availability: "Unavailable",
     currentAssignment: "NG-2026-114",
     lastStatusUpdate: demoMinutesAgo(6)
   },
@@ -28,7 +28,7 @@ export const responders: Responder[] = [
     agency: "BFP",
     role: "Fire Suppression Crew",
     contactNumber: "(074) 422-1131",
-    availability: "Responding",
+    availability: "Unavailable",
     currentAssignment: "NG-2026-113",
     lastStatusUpdate: demoMinutesAgo(9)
   },
@@ -78,7 +78,7 @@ export const responders: Responder[] = [
     agency: "MDRRMO",
     role: "Communications",
     contactNumber: "Internal Radio Base",
-    availability: "Busy",
+    availability: "Unavailable",
     currentAssignment: "Operations desk coordination",
     lastStatusUpdate: demoMinutesAgo(4)
   }

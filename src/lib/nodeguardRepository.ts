@@ -87,6 +87,12 @@ type ResponderRow = {
   last_status_update: string;
 };
 
+type ResponderAssignmentRow = {
+  public_id: string;
+  status: IncidentRow["status"];
+  assigned_responder_name: string | null;
+};
+
 type DeviceLocationRow = {
   device_id: string;
   name: string;
@@ -165,12 +171,18 @@ export async function fetchResponders(): Promise<Responder[]> {
   const supabase = getSupabaseClient();
   if (!supabase) return mockResponders;
 
-  const { data, error } = await supabase
-    .from("responders")
-    .select(
-      "id, profile_id, public_code, name, agency_unit, role, contact_number, availability, current_assignment, last_status_update",
-    )
-    .order("name");
+  const [responderResult, assignmentResult] = await Promise.all([
+    supabase
+      .from("responders")
+      .select(
+        "id, profile_id, public_code, name, agency_unit, role, contact_number, availability, current_assignment, last_status_update",
+      )
+      .order("name"),
+    supabase
+      .from("incidents")
+      .select("public_id, status, assigned_responder_name"),
+  ]);
+  const { data, error } = responderResult;
 
   if (error || !data) {
     throw new NodeGuardRepositoryError(
@@ -178,16 +190,51 @@ export async function fetchResponders(): Promise<Responder[]> {
     );
   }
 
-  return (data as ResponderRow[]).map((row) => ({
-    id: row.public_code,
-    name: row.name,
-    agency: row.agency_unit,
-    role: row.role,
-    contactNumber: row.contact_number ?? "Not provided",
-    availability: mapResponderAvailability(row.availability),
-    currentAssignment: row.current_assignment ?? "None",
-    lastStatusUpdate: formatTimestamp(row.last_status_update),
-  }));
+  const assignments = (assignmentResult.data ?? []) as ResponderAssignmentRow[];
+  const activeDbStatuses: IncidentRow["status"][] = [
+    "assigned",
+    "en_route",
+    "responding",
+    "on_scene",
+    "need_backup",
+  ];
+  const finalDbStatuses: IncidentRow["status"][] = [
+    "resolved",
+    "closed",
+    "false_alert",
+  ];
+
+  return (data as ResponderRow[]).map((row) => {
+    const activeAssignment = assignments.find(
+      (incident) =>
+        incident.assigned_responder_name === row.name &&
+        activeDbStatuses.includes(incident.status),
+    );
+    const recordedAssignment = assignments.find(
+      (incident) => incident.public_id === row.current_assignment,
+    );
+    const recordedAssignmentIsFinal =
+      recordedAssignment && finalDbStatuses.includes(recordedAssignment.status);
+
+    return {
+      id: row.public_code,
+      name: row.name,
+      agency: row.agency_unit,
+      role: row.role,
+      contactNumber: row.contact_number ?? "Not provided",
+      availability: activeAssignment
+        ? "Unavailable"
+        : recordedAssignmentIsFinal
+          ? "Available"
+          : mapResponderAvailability(row.availability),
+      currentAssignment: activeAssignment
+        ? activeAssignment.public_id
+        : recordedAssignmentIsFinal
+          ? "None"
+          : row.current_assignment ?? "None",
+      lastStatusUpdate: formatTimestamp(row.last_status_update),
+    };
+  });
 }
 
 export async function fetchDeviceNodes(): Promise<DeviceNode[]> {
@@ -301,31 +348,18 @@ export async function updateIncidentWorkflowStatus(
   const supabase = getSupabaseClient();
   if (!supabase) return { ok: true, reason: "Demo status update completed locally." };
 
-  const { data: incident, error: incidentError } = await supabase
-    .from("incidents")
-    .select("id")
-    .eq("public_id", publicId)
-    .single();
-  if (incidentError || !incident) {
-    return { ok: false, reason: incidentError?.message ?? "Incident not found." };
-  }
-
-  const { error } = await supabase.from("incident_status_updates").insert({
-    incident_id: incident.id,
-    status: mapWebStatusToDb(status),
-    remarks: `Status changed to ${status} from the NodeGuard operations dashboard.`,
-    created_by: actorId ?? null,
+  const { error } = await supabase.rpc("update_nodeguard_incident_status", {
+    p_incident_public_id: publicId,
+    p_status: mapWebStatusToDb(status),
+    p_actor_id: actorId ?? null,
   });
-  if (error) return { ok: false, reason: error.message };
-
-  if (actorId) {
-    await supabase.from("audit_logs").insert({
-      actor_profile_id: actorId,
-      action: "update_incident_status",
-      entity_type: "incident",
-      entity_id: publicId,
-      details: { status },
-    });
+  if (error) {
+    return {
+      ok: false,
+      reason: error.message.includes("update_nodeguard_incident_status")
+        ? "The protected workflow update is unavailable. Apply migration 0006 before changing incident status."
+        : error.message,
+    };
   }
   return { ok: true };
 }
@@ -336,8 +370,56 @@ export async function assignResponderToIncident(
   actorId?: string,
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase)
+  if (!supabase) {
+    const incident = mockIncidents.find((item) => item.id === incidentPublicId);
+    const responder = mockResponders.find((item) => item.id === responderPublicCode);
+    if (!incident || !responder) {
+      return { ok: false, reason: "Incident or responder/team was not found." };
+    }
+    if (responder.availability !== "Available") {
+      return {
+        ok: false,
+        reason: `${responder.name} is unavailable because the team is currently assigned to ${responder.currentAssignment}.`,
+      };
+    }
     return { ok: true, reason: "Demo assignment completed locally." };
+  }
+
+  const { data: responder, error: responderError } = await supabase
+    .from("responders")
+    .select("name, availability, current_assignment")
+    .eq("public_code", responderPublicCode)
+    .maybeSingle();
+  if (responderError || !responder) {
+    return { ok: false, reason: responderError?.message ?? "Responder/team was not found." };
+  }
+  if (responder.availability !== "available") {
+    return {
+      ok: false,
+      reason: `${responder.name} is unavailable${responder.current_assignment ? ` because the team is assigned to ${responder.current_assignment}` : ""}. Select an available responder or team.`,
+    };
+  }
+  const { data: possibleConflicts, error: conflictError } = await supabase
+    .from("incidents")
+    .select("public_id, status")
+    .eq("assigned_responder_name", responder.name);
+  if (conflictError) {
+    return { ok: false, reason: conflictError.message };
+  }
+  const conflict = (possibleConflicts ?? []).find((incident) =>
+    ["assigned", "en_route", "responding", "on_scene", "need_backup"].includes(
+      incident.status,
+    ),
+  );
+  if (conflict) {
+    return {
+      ok: false,
+      reason:
+        conflict.public_id === incidentPublicId
+          ? `${responder.name} is already assigned to ${incidentPublicId}.`
+          : `${responder.name} is unavailable because the team is already assigned to ${conflict.public_id}. Select an available responder or team.`,
+    };
+  }
 
   const rpc = await supabase.rpc("assign_nodeguard_responder", {
     p_responder_code: responderPublicCode,
@@ -345,11 +427,39 @@ export async function assignResponderToIncident(
     p_actor_id: actorId ?? null,
   });
   if (!rpc.error) return { ok: true };
+  const normalizedMessage = rpc.error.message.toLowerCase();
   return {
     ok: false,
-    reason: rpc.error.message.includes("assign_nodeguard_responder")
-      ? "Atomic responder assignment is unavailable. Apply migration 0005 before dispatching."
-      : rpc.error.message,
+    reason: normalizedMessage.includes("unavailable") ||
+      normalizedMessage.includes("already assigned")
+      ? rpc.error.message
+      : rpc.error.message.includes("assign_nodeguard_responder")
+        ? "Atomic responder assignment is unavailable. Apply migration 0006 before dispatching."
+        : rpc.error.message,
+  };
+}
+
+export async function removeResponderFromIncident(
+  incidentPublicId: string,
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    const incident = mockIncidents.find((item) => item.id === incidentPublicId);
+    if (!incident) return { ok: false, reason: "Incident not found." };
+    return { ok: true, reason: "Demo team removal completed locally." };
+  }
+
+  const { error } = await supabase.rpc("unassign_nodeguard_responder", {
+    p_incident_public_id: incidentPublicId,
+    p_actor_id: actorId ?? null,
+  });
+  if (!error) return { ok: true };
+  return {
+    ok: false,
+    reason: error.message.includes("unassign_nodeguard_responder")
+      ? "Protected team removal is unavailable. Apply migration 0006 before removing an assignment."
+      : error.message,
   };
 }
 
@@ -376,8 +486,22 @@ export async function validateIncident(
   actorId?: string,
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase)
+  if (!supabase) {
+    const incident = mockIncidents.find((item) => item.id === incidentPublicId);
+    if (!incident) return { ok: false, reason: "Incident not found." };
+    if (incident.validationStatus === validationStatus) {
+      return {
+        ok: false,
+        reason:
+          validationStatus === "Confirmed"
+            ? "This alert is already verified."
+            : validationStatus === "False Alarm"
+              ? "This incident is already marked as a false alert."
+              : "This alert is already pending review.",
+      };
+    }
     return { ok: true, reason: "Demo alert validation completed locally." };
+  }
 
   const dbStatus =
     validationStatus === "Confirmed"
@@ -385,6 +509,31 @@ export async function validateIncident(
       : validationStatus === "False Alarm"
         ? "false_alarm"
         : "pending_review";
+  const { data: incident, error: incidentError } = await supabase
+    .from("incidents")
+    .select("status, validation_status")
+    .eq("public_id", incidentPublicId)
+    .maybeSingle();
+  if (incidentError || !incident) {
+    return { ok: false, reason: incidentError?.message ?? "Incident not found." };
+  }
+  if (incident.validation_status === dbStatus) {
+    return {
+      ok: false,
+      reason:
+        dbStatus === "confirmed"
+          ? "This alert is already verified."
+          : dbStatus === "false_alarm"
+            ? "This incident is already marked as a false alert."
+            : "This alert is already pending review.",
+    };
+  }
+  if (!["new_alert", "false_alert"].includes(incident.status)) {
+    return {
+      ok: false,
+      reason: "Verification can no longer be changed after team dispatch has started.",
+    };
+  }
   const { error } = await supabase.rpc("validate_nodeguard_incident", {
     p_incident_public_id: incidentPublicId,
     p_validation_status: dbStatus,
@@ -612,9 +761,8 @@ function mapResponderAvailability(
   availability: ResponderRow["availability"],
 ): Responder["availability"] {
   if (availability === "available") return "Available";
-  if (availability === "dispatched") return "Dispatched";
   if (availability === "offline") return "Offline";
-  return "Busy";
+  return "Unavailable";
 }
 
 function formatTimestamp(value: string) {

@@ -22,10 +22,7 @@ type RespondersResourcesFiltersProps = {
 const responderStatuses: Array<ResponderStatus | "All"> = [
   "All",
   "Available",
-  "En Route",
-  "On Scene",
-  "Responding",
-  "Busy",
+  "Unavailable",
   "Offline"
 ];
 const resourceStatuses: Array<ResourceStatus | "All"> = [
