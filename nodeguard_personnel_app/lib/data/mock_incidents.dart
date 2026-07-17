@@ -1,4 +1,5 @@
 import '../models/incident.dart';
+import '../models/alert_level.dart';
 
 final mockIncidents = _buildMockIncidents();
 
@@ -24,7 +25,7 @@ const _locations = <_IncidentLocation>[
     'Pico roadside node',
     '16.4558, 120.5892',
     'Resident reports a person needing urgent medical assistance near the roadside.',
-    IncidentPriority.critical,
+    IncidentAlertLevel.critical,
   ),
   _IncidentLocation(
     IncidentCategory.security,
@@ -34,7 +35,7 @@ const _locations = <_IncidentLocation>[
     'Market entrance node',
     '16.4612, 120.5899',
     'Public safety concern reported near the produce loading area.',
-    IncidentPriority.high,
+    IncidentAlertLevel.high,
   ),
   _IncidentLocation(
     IncidentCategory.fireDisaster,
@@ -44,7 +45,7 @@ const _locations = <_IncidentLocation>[
     'Terminal bay node',
     '16.4597, 120.5908',
     'Possible fire or disaster-related report near the terminal bay.',
-    IncidentPriority.high,
+    IncidentAlertLevel.high,
   ),
 ];
 
@@ -70,8 +71,11 @@ List<Incident> _buildMockIncidents() {
           nodeLocation: location.nodeLocation,
           timestamp: DateTime(
               2026, 7, 6, 8 - (groupIndex ~/ 3), 42 - locationIndex * 9),
-          priority:
-              groupIndex < 2 ? IncidentPriority.critical : location.priority,
+          alertLevel: status == IncidentStatus.newAlert
+              ? IncidentAlertLevel.unassessed
+              : groupIndex < 2
+                  ? IncidentAlertLevel.critical
+                  : location.alertLevel,
           voiceContextAvailable: locationIndex != 2,
           voiceDuration: locationIndex == 0
               ? '00:12'
@@ -107,7 +111,7 @@ class _IncidentLocation {
     this.nodeLocation,
     this.coordinates,
     this.context,
-    this.priority,
+    this.alertLevel,
   );
 
   final IncidentCategory category;
@@ -117,5 +121,5 @@ class _IncidentLocation {
   final String nodeLocation;
   final String coordinates;
   final String context;
-  final IncidentPriority priority;
+  final IncidentAlertLevel alertLevel;
 }

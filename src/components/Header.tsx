@@ -24,7 +24,8 @@ type HeaderProps = {
   onMenuClick: () => void;
   operatorName: string;
   roleLabel: string;
-  onLogout: () => void;
+  onLogout?: () => void;
+  publicDemo?: boolean;
   systemHealthy: boolean;
   lastSynced: Date | null;
   nodeHealth: { online: number; total: number };
@@ -46,6 +47,7 @@ export function Header({
   operatorName,
   roleLabel,
   onLogout,
+  publicDemo = false,
   systemHealthy,
   lastSynced,
   nodeHealth,
@@ -114,10 +116,20 @@ export function Header({
             <NetworkCheckOutlinedIcon color={manualLowBandwidth ? "primary" : "inherit"} />
           </IconButton>
         </Tooltip>
-        <Chip label={roleLabel} size="small" sx={{ display: { xs: "none", xl: "flex" }, bgcolor: "rgba(255,255,255,0.14)", color: "white" }} />
-        <Tooltip title={`Sign out ${operatorName}`}>
-          <IconButton color="inherit" onClick={onLogout} aria-label={`Sign out ${operatorName}`}><LogoutIcon /></IconButton>
-        </Tooltip>
+        <Chip
+          label={publicDemo ? "Public Demo" : roleLabel}
+          size="small"
+          sx={{
+            display: { xs: "none", xl: "flex" },
+            bgcolor: publicDemo ? "rgba(144, 202, 249, 0.24)" : "rgba(255,255,255,0.14)",
+            color: "white",
+          }}
+        />
+        {onLogout && (
+          <Tooltip title={`Sign out ${operatorName}`}>
+            <IconButton color="inherit" onClick={onLogout} aria-label={`Sign out ${operatorName}`}><LogoutIcon /></IconButton>
+          </Tooltip>
+        )}
       </Toolbar>
     </AppBar>
   );

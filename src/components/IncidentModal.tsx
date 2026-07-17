@@ -24,7 +24,9 @@ import MapIcon from "@mui/icons-material/Map";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Incident, Responder, ValidationStatus } from "@/types";
 import { StatusChip } from "@/components/StatusChip";
-import { PriorityChip } from "@/components/PriorityChip";
+import { AlertLevelChip } from "@/components/AlertLevelChip";
+import { IncidentAlertLevelPanel } from "@/components/IncidentAlertLevelPanel";
+import { BackupCoordinationPanel } from "@/components/BackupCoordinationPanel";
 import { authorizedFetch } from "@/lib/auth";
 import { SafeConfirmDialog } from "@/components/SafeConfirmDialog";
 import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
@@ -42,7 +44,6 @@ type SafeAction =
   | "remove-assignment"
   | "start-response"
   | "mark-on-scene"
-  | "resolve"
   | "close"
   | null;
 
@@ -305,8 +306,6 @@ export function IncidentModal({
         return { title: "Start active response", summary: `Confirm that the dispatched team is actively responding to ${incident.id}.`, confirmLabel: "Mark Responding", tone: "set" as const };
       case "mark-on-scene":
         return { title: "Confirm team arrival", summary: `Confirm that the assigned team has reached ${incident.location}.`, confirmLabel: "Mark On Scene", tone: "set" as const };
-      case "resolve":
-        return { title: "Resolve incident", summary: `Confirm that the immediate emergency for ${incident.id} has been addressed. The record can still be reviewed before closure.`, confirmLabel: "Resolve Incident", tone: "set" as const };
       case "close":
         return { title: "Close incident record", summary: `Close ${incident.id} after operational review. This removes it from active monitoring.`, confirmLabel: "Close Incident", tone: "set" as const };
       default:
@@ -323,7 +322,6 @@ export function IncidentModal({
     if (action === "remove-assignment") await removeAssignment();
     if (action === "start-response") await updateWorkflowStatus("Responding");
     if (action === "mark-on-scene") await updateWorkflowStatus("On Scene");
-    if (action === "resolve") await updateWorkflowStatus("Resolved");
     if (action === "close") await updateWorkflowStatus("Closed");
   };
 
@@ -371,7 +369,7 @@ export function IncidentModal({
   };
 
   const updateWorkflowStatus = async (
-    status: "Responding" | "On Scene" | "Resolved" | "Closed",
+    status: "Responding" | "On Scene" | "Closed",
   ) => {
     setIsUpdatingStatus(true);
     setStatusMessage(null);
@@ -389,26 +387,7 @@ export function IncidentModal({
 
       const updatedIncident: Incident = { ...incident, status };
       onIncidentUpdated?.(updatedIncident);
-      if (status === "Resolved") {
-        onRespondersUpdated?.(
-          responders.map((responder) =>
-            responder.name === incident.assignedResponder &&
-            responder.currentAssignment === incident.id
-              ? {
-                  ...responder,
-                  availability: "Available" as const,
-                  currentAssignment: "None",
-                  lastStatusUpdate: new Date().toISOString(),
-                }
-              : responder,
-          ),
-        );
-      }
-      setStatusMessage(
-        status === "Resolved"
-          ? "Incident resolved. The assigned responder/team is available again."
-          : `Incident marked ${status.toLowerCase()}.`,
-      );
+      setStatusMessage(`Incident marked ${status.toLowerCase()}.`);
     } catch {
       setStatusMessage("Status update failed because the workflow service could not be reached.");
     } finally {
@@ -420,7 +399,7 @@ export function IncidentModal({
   const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md" aria-labelledby="incident-details-title">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" aria-labelledby="incident-details-title">
       <DialogTitle id="incident-details-title">
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { sm: "center" }, justifyContent: "space-between" }}>
           <Box>
@@ -428,7 +407,7 @@ export function IncidentModal({
             <Typography variant="body2" color="text.secondary">Incident details and valid operational actions</Typography>
           </Box>
           <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-            <PriorityChip priority={incident.priority} />
+            <AlertLevelChip alertLevel={incident.alertLevel} />
             <StatusChip status={incident.status} />
           </Stack>
         </Stack>
@@ -437,13 +416,8 @@ export function IncidentModal({
         <Grid container spacing={2}>
           {[
             ["Category", incident.category],
-            ["Node ID", incident.deviceId],
             ["Registered Location", incident.location],
-            ["Address / Landmark", incident.approximateAddress ?? "Not recorded"],
-            ["Coordinates", incident.coordinates ?? "Not recorded"],
             ["Reported", `${formatPhilippineDateTime(incident.timestamp)} PHT`],
-            ["Elapsed Time", getElapsedWaitingTime(incident)],
-            ["Trigger Method", incident.triggerMethod],
             ["Assigned Team", incident.assignedResponder],
           ].map(([label, value]) => (
             <Grid key={label} size={{ xs: 12, sm: 6 }}>
@@ -459,7 +433,54 @@ export function IncidentModal({
               </Typography>
             </Grid>
           ))}
+          <Grid size={{ xs: 12 }}>
+            <Box
+              component="details"
+              sx={{
+                border: "1px solid",
+                borderColor: "divider",
+                borderRadius: 1,
+                px: 1.5,
+                py: 1,
+                "& summary": { cursor: "pointer", fontWeight: 800 },
+              }}
+            >
+              <Box component="summary">Incident &amp; device details</Box>
+              <Grid container spacing={1.5} sx={{ mt: 0.5 }}>
+                {[
+                  ["Node ID", incident.deviceId],
+                  ["Address / Landmark", incident.approximateAddress ?? "Not recorded"],
+                  ["Coordinates", incident.coordinates ?? "Not recorded"],
+                  ["Elapsed Time", getElapsedWaitingTime(incident)],
+                  ["Trigger Method", incident.triggerMethod],
+                ].map(([label, value]) => (
+                  <Grid key={label} size={{ xs: 12, sm: 6, md: 4 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                      {label}
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      {value}
+                    </Typography>
+                  </Grid>
+                ))}
+              </Grid>
+            </Box>
+          </Grid>
           <Grid size={{ xs: 12 }}><Divider /></Grid>
+          <Grid size={{ xs: 12 }}>
+            <IncidentAlertLevelPanel
+              incident={incident}
+              online={online}
+              onIncidentUpdated={onIncidentUpdated}
+            />
+          </Grid>
+          <Grid size={{ xs: 12 }}>
+            <BackupCoordinationPanel
+              incident={incident}
+              online={online}
+              onIncidentUpdated={onIncidentUpdated}
+            />
+          </Grid>
           <Grid size={{ xs: 12 }}>
             <Stack
               direction={{ xs: "column", sm: "row" }}
@@ -575,21 +596,20 @@ export function IncidentModal({
           <Grid size={{ xs: 12 }}>
             <Divider />
           </Grid>
-          {validActions.some((action) => ["start-response", "mark-on-scene", "resolve", "close"].includes(action)) && (
+          {validActions.some((action) => ["start-response", "mark-on-scene", "close"].includes(action)) && (
             <Grid size={{ xs: 12 }}>
               <Stack spacing={1} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.5 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Valid Status Actions</Typography>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
                   {validActions.includes("start-response") && <Button variant="outlined" disabled={!online || isUpdatingStatus} onClick={() => setSafeAction("start-response")}>Start Response</Button>}
                   {validActions.includes("mark-on-scene") && <Button variant="outlined" disabled={!online || isUpdatingStatus} onClick={() => setSafeAction("mark-on-scene")}>Mark On Scene</Button>}
-                  {validActions.includes("resolve") && <Button color="success" disabled={!online || isUpdatingStatus} onClick={() => setSafeAction("resolve")}>Resolve</Button>}
                   {validActions.includes("close") && <Button variant="outlined" disabled={!online || isUpdatingStatus} onClick={() => setSafeAction("close")}>Close Incident</Button>}
                 </Stack>
                 {statusMessage && <Typography variant="body2" color={statusMessage.includes("failed") ? "error" : "success.main"} sx={{ fontWeight: 700 }}>{statusMessage}</Typography>}
               </Stack>
             </Grid>
           )}
-          <Grid size={{ xs: 12 }}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Typography
               variant="caption"
               color="text.secondary"
@@ -614,7 +634,7 @@ export function IncidentModal({
               </audio>
             )}
           </Grid>
-          <Grid size={{ xs: 12 }}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Stack
               direction={{ xs: "column", sm: "row" }}
               spacing={1.5}
@@ -679,13 +699,41 @@ export function IncidentModal({
             </Stack>
           </Grid>
           <Grid size={{ xs: 12 }}>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontWeight: 800 }}
+            <Box
+              component="details"
+              sx={{
+                border: "1px solid",
+                borderColor: "divider",
+                borderRadius: 1,
+                px: 1.5,
+                py: 1,
+                "& summary": { cursor: "pointer" },
+              }}
             >
-              Incident History &amp; Field Updates
-            </Typography>
+              <Box component="summary">
+                <Typography component="span" variant="subtitle2" sx={{ fontWeight: 900 }}>
+                  Activity &amp; Field Updates ({(incident.activityHistory?.length ?? 0) + (incident.fieldNoteCount ?? 0)})
+                </Typography>
+              </Box>
+            {(incident.activityHistory?.length ?? 0) > 0 && (
+              <Stack spacing={1} sx={{ mt: 0.75, mb: 1.5 }}>
+                {incident.activityHistory?.map((activity) => (
+                  <Box
+                    key={activity.id}
+                    sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.25 }}
+                  >
+                    <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                      {activity.message}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {formatPhilippineDateTime(activity.createdAt)} PHT
+                      {activity.source ? ` · ${activity.source}` : ""}
+                      {activity.reason ? ` · Reason: ${activity.reason}` : ""}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+            )}
             {incident.fieldNoteCount ? (
               <Stack spacing={1} sx={{ mt: 0.5 }}>
                 <Typography variant="body2" color="text.secondary">
@@ -735,6 +783,7 @@ export function IncidentModal({
                 No field notes received yet.
               </Typography>
             )}
+            </Box>
           </Grid>
           <Grid size={{ xs: 12 }}>
             <Stack spacing={1.5} sx={{ mt: 1 }}>

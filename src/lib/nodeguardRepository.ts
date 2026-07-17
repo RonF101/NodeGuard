@@ -3,6 +3,13 @@ import { incidents as mockIncidents } from "@/data/incidents";
 import { responders as mockResponders } from "@/data/responders";
 import { resources as mockResources } from "@/data/resources";
 import {
+  AlertLevel,
+  AlertLevelUpdateSource,
+  BackupAssistanceType,
+  BackupOffer,
+  BackupOfferStatus,
+  BackupRequest,
+  BackupRequestStatus,
   DeviceNode,
   Incident,
   IncidentStatus,
@@ -11,6 +18,7 @@ import {
   ValidationStatus,
 } from "@/types";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+import { mapAlertLevelToDatabase, mapDatabaseAlertLevel } from "@/config/alertLevels";
 
 export class NodeGuardRepositoryError extends Error {
   constructor(message: string) {
@@ -43,7 +51,32 @@ type IncidentRow = {
   node_location?: string;
   coordinates?: string;
   assigned_responder_name: string | null;
-  priority: "critical" | "high" | "medium" | "low";
+  priority: "unassessed" | "critical" | "high" | "medium" | "low";
+  priority_updated_at?: string | null;
+  priority_updated_by?: string | null;
+  priority_update_source?: "dashboard" | "personnel_app" | "device" | null;
+  priority_update_reason?: string | null;
+  incident_priority_updates?: Array<{
+    id: string;
+    previous_priority: IncidentRow["priority"];
+    new_priority: IncidentRow["priority"];
+    actor_name: string;
+    actor_role: string;
+    source: "dashboard" | "personnel_app" | "device";
+    reason: string | null;
+    created_at: string;
+  }>;
+  incident_activity_events?: Array<{
+    id: string;
+    event_type: "backup" | "assignment" | "status";
+    message: string;
+    actor_name: string | null;
+    actor_role: string | null;
+    source: "dashboard" | "personnel_app" | "system";
+    reason: string | null;
+    created_at: string;
+  }>;
+  backup_requests?: BackupRequestRow[];
   incident_status_updates?: Array<{
     remarks: string | null;
     created_at: string;
@@ -72,6 +105,43 @@ type IncidentRow = {
         duration_seconds: number | null;
       }>
     | null;
+};
+
+type BackupOfferRow = {
+  id: string;
+  responder_id: string;
+  status: "offered" | "approved" | "declined" | "withdrawn";
+  offered_at: string;
+  decided_at: string | null;
+  decision_note: string | null;
+  responders?:
+    | { name: string; availability: ResponderRow["availability"] }
+    | Array<{ name: string; availability: ResponderRow["availability"] }>
+    | null;
+};
+
+type BackupRequestRow = {
+  id: string;
+  public_id: string;
+  status:
+    | "requested"
+    | "assistance_offered"
+    | "partially_filled"
+    | "confirmed"
+    | "fulfilled"
+    | "cancelled"
+    | "closed";
+  requested_at: string;
+  requested_by: string;
+  requesting_team: string;
+  assistance_types: string[];
+  responders_needed: number;
+  reason: string;
+  urgency: "critical" | "high" | "moderate" | "low";
+  fulfilled_at: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  backup_offers?: BackupOfferRow[];
 };
 
 type ResponderRow = {
@@ -119,7 +189,7 @@ type ResourceRow = {
 };
 
 const incidentSelectEnhanced =
-  "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, validation_status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, incident_status_updates(remarks, created_at, status), device_locations(buzzer_active, buzzer_updated_at), voice_contexts(storage_path, transcript, duration_seconds)";
+  "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, validation_status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, priority_updated_at, priority_updated_by, priority_update_source, priority_update_reason, incident_status_updates(remarks, created_at, status), incident_priority_updates(id, previous_priority, new_priority, actor_name, actor_role, source, reason, created_at), incident_activity_events(id, event_type, message, actor_name, actor_role, source, reason, created_at), backup_requests(id, public_id, status, requested_at, requested_by, requesting_team, assistance_types, responders_needed, reason, urgency, fulfilled_at, cancelled_at, cancellation_reason, backup_offers(id, responder_id, status, offered_at, decided_at, decision_note, responders(name, availability))), device_locations(buzzer_active, buzzer_updated_at), voice_contexts(storage_path, transcript, duration_seconds)";
 
 const incidentSelectWithBuzzer =
   "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, incident_status_updates(remarks, created_at, status), device_locations(buzzer_active, buzzer_updated_at)";
@@ -342,7 +412,7 @@ export async function submitIncidentStatusUpdate(
 
 export async function updateIncidentWorkflowStatus(
   publicId: string,
-  status: Extract<IncidentStatus, "Responding" | "On Scene" | "Resolved" | "Closed">,
+  status: Extract<IncidentStatus, "Responding" | "On Scene" | "Closed">,
   actorId?: string,
 ) {
   const supabase = getSupabaseClient();
@@ -362,6 +432,70 @@ export async function updateIncidentWorkflowStatus(
     };
   }
   return { ok: true };
+}
+
+export async function updateIncidentAlertLevel(
+  publicId: string,
+  alertLevel: AlertLevel,
+  source: "dashboard" | "personnel_app",
+  reason?: string,
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    const incident = mockIncidents.find((item) => item.id === publicId);
+    if (!incident) return { ok: false, reason: "Incident not found." };
+    return { ok: true, reason: "Demo alert-level update completed locally." };
+  }
+
+  const { data, error } = await supabase.rpc("update_nodeguard_alert_level", {
+    p_incident_public_id: publicId,
+    p_alert_level: mapAlertLevelToDatabase(alertLevel),
+    p_source: source,
+    p_reason: reason?.trim() || null,
+    p_actor_id: actorId ?? null,
+  });
+  if (error) {
+    return {
+      ok: false,
+      reason: error.message.includes("update_nodeguard_alert_level")
+        ? "Alert-level updates are unavailable. Apply migrations 0007 and 0008."
+        : error.message,
+    };
+  }
+  return { ok: true, data };
+}
+
+export async function decideBackupOffer(
+  offerId: string,
+  decision: "approved" | "declined",
+  note?: string,
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { ok: true, reason: "Demo backup decision completed locally." };
+  const { data, error } = await supabase.rpc("decide_nodeguard_backup_offer", {
+    p_offer_id: offerId,
+    p_decision: decision,
+    p_note: note?.trim() || null,
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true, data };
+}
+
+export async function cancelBackupRequest(
+  requestId: string,
+  reason: string,
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { ok: true, reason: "Demo backup cancellation completed locally." };
+  const { data, error } = await supabase.rpc("cancel_nodeguard_backup_request", {
+    p_backup_request_id: requestId,
+    p_reason: reason.trim(),
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true, data };
 }
 
 export async function assignResponderToIncident(
@@ -624,6 +758,32 @@ async function mapIncidentRow(
   const voiceContext = Array.isArray(row.voice_contexts)
     ? row.voice_contexts[0]
     : row.voice_contexts;
+  const priorityUpdates = (row.incident_priority_updates ?? []).toSorted((a, b) =>
+    String(b.created_at).localeCompare(String(a.created_at)),
+  );
+  const activityEvents = (row.incident_activity_events ?? []).map((event) => ({
+    id: event.id,
+    type:
+      event.event_type === "assignment"
+        ? "Assignment" as const
+        : event.event_type === "status"
+          ? "Status" as const
+          : "Backup" as const,
+    message: event.message,
+    actorName: event.actor_name ?? undefined,
+    actorRole: event.actor_role ?? undefined,
+    source: mapAlertLevelSource(event.source),
+    reason: event.reason ?? undefined,
+    createdAt: formatTimestamp(event.created_at),
+  }));
+  const backupRows = (row.backup_requests ?? []).toSorted((a, b) =>
+    String(b.requested_at).localeCompare(String(a.requested_at)),
+  );
+  const currentBackup = backupRows.find((request) =>
+    ["requested", "assistance_offered", "partially_filled", "confirmed"].includes(
+      request.status,
+    ),
+  ) ?? backupRows[0];
   let voiceUrl: string | undefined;
   if (voiceContext?.storage_path) {
     const { data } = await supabase.storage
@@ -648,14 +808,13 @@ async function mapIncidentRow(
     nodeLocation: row.node_location,
     coordinates: row.coordinates,
     assignedResponder: row.assigned_responder_name ?? "Unassigned",
-    priority:
-      row.priority === "critical"
-        ? "Critical"
-        : row.priority === "high"
-          ? "High"
-          : row.priority === "low"
-            ? "Low"
-            : "Moderate",
+    alertLevel: mapDatabaseAlertLevel(row.priority),
+    alertLevelUpdatedAt: row.priority_updated_at
+      ? formatTimestamp(row.priority_updated_at)
+      : undefined,
+    alertLevelUpdatedBy: priorityUpdates[0]?.actor_name,
+    alertLevelUpdateSource: mapAlertLevelSource(row.priority_update_source),
+    alertLevelUpdateReason: row.priority_update_reason ?? undefined,
     buzzerActive: deviceLocation?.buzzer_active ?? false,
     buzzerUpdatedAt: deviceLocation?.buzzer_updated_at
       ? formatTimestamp(deviceLocation.buzzer_updated_at)
@@ -675,7 +834,105 @@ async function mapIncidentRow(
     validationStatus: mapValidationStatus(row.validation_status, row.status),
     voiceTranscript: voiceContext?.transcript ?? undefined,
     voiceUrl,
+    activityHistory: [
+      ...priorityUpdates.map((update) => ({
+        id: update.id,
+        type: "Alert Level" as const,
+        message: `Alert level changed from ${mapDatabaseAlertLevel(update.previous_priority)} to ${mapDatabaseAlertLevel(update.new_priority)} by ${update.actor_name}, ${update.actor_role}.`,
+        actorName: update.actor_name,
+        actorRole: update.actor_role,
+        source: mapAlertLevelSource(update.source),
+        reason: update.reason ?? undefined,
+        createdAt: formatTimestamp(update.created_at),
+      })),
+      ...activityEvents,
+    ].toSorted((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    backupRequest: currentBackup ? mapBackupRequest(currentBackup, row.public_id) : undefined,
   };
+}
+
+function mapAlertLevelSource(
+  source: IncidentRow["priority_update_source"] | "dashboard" | "personnel_app" | "device" | "system" | null,
+): AlertLevelUpdateSource | undefined {
+  if (source === "dashboard") return "Dashboard";
+  if (source === "personnel_app") return "Personnel Application";
+  if (source === "device") return "Device";
+  return undefined;
+}
+
+function mapBackupRequest(row: BackupRequestRow, incidentId: string): BackupRequest {
+  const offers = (row.backup_offers ?? []).map(mapBackupOffer);
+  return {
+    id: row.id,
+    incidentId,
+    status: mapBackupRequestStatus(row.status),
+    requestedAt: formatTimestamp(row.requested_at),
+    requestedBy: row.requested_by,
+    requestingTeam: row.requesting_team,
+    assistanceTypes: row.assistance_types.map(mapBackupAssistanceType),
+    respondersNeeded: row.responders_needed,
+    reason: row.reason,
+    urgency: row.urgency === "moderate"
+      ? "Moderate"
+      : mapDatabaseAlertLevel(row.urgency) as Exclude<AlertLevel, "Unassessed">,
+    offers,
+    confirmedResponders: offers.filter((offer) => offer.status === "Approved"),
+    fulfilledAt: row.fulfilled_at ? formatTimestamp(row.fulfilled_at) : undefined,
+    cancelledAt: row.cancelled_at ? formatTimestamp(row.cancelled_at) : undefined,
+    cancellationReason: row.cancellation_reason ?? undefined,
+  };
+}
+
+function mapBackupOffer(row: BackupOfferRow): BackupOffer {
+  const responder = Array.isArray(row.responders) ? row.responders[0] : row.responders;
+  return {
+    id: row.id,
+    responderId: row.responder_id,
+    responderName: responder?.name ?? "Unknown responder",
+    responderAvailability: responder
+      ? mapResponderAvailability(responder.availability)
+      : "Offline",
+    status: mapBackupOfferStatus(row.status),
+    offeredAt: formatTimestamp(row.offered_at),
+    decidedAt: row.decided_at ? formatTimestamp(row.decided_at) : undefined,
+    decisionNote: row.decision_note ?? undefined,
+  };
+}
+
+function mapBackupRequestStatus(value: BackupRequestRow["status"]): BackupRequestStatus {
+  const values: Record<BackupRequestRow["status"], BackupRequestStatus> = {
+    requested: "Requested",
+    assistance_offered: "Assistance Offered",
+    partially_filled: "Partially Filled",
+    confirmed: "Confirmed",
+    fulfilled: "Fulfilled",
+    cancelled: "Cancelled",
+    closed: "Closed",
+  };
+  return values[value];
+}
+
+function mapBackupOfferStatus(value: BackupOfferRow["status"]): BackupOfferStatus {
+  const values: Record<BackupOfferRow["status"], BackupOfferStatus> = {
+    offered: "Offered",
+    approved: "Approved",
+    declined: "Declined",
+    withdrawn: "Withdrawn",
+  };
+  return values[value];
+}
+
+function mapBackupAssistanceType(value: string): BackupAssistanceType {
+  const values: Record<string, BackupAssistanceType> = {
+    medical: "Medical Responders",
+    fire: "Fire Responders",
+    police_public_safety: "Police / Public Safety Personnel",
+    rescue: "Rescue Personnel",
+    barangay: "Barangay Emergency Responders",
+    general: "Additional General Responders",
+    equipment_vehicle: "Equipment or Vehicle Support",
+  };
+  return values[value] ?? "Additional General Responders";
 }
 
 function mapValidationStatus(

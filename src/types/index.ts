@@ -11,7 +11,36 @@ export type IncidentStatus =
   | "Closed"
   | "False Alert";
 
-export type IncidentPriority = "Critical" | "High" | "Moderate" | "Low";
+export type AlertLevel =
+  | "Unassessed"
+  | "Critical"
+  | "High"
+  | "Moderate"
+  | "Low";
+
+export type IncidentPriority = AlertLevel;
+
+export type AlertLevelUpdateSource = "Dashboard" | "Personnel Application" | "Device";
+
+export type BackupRequestStatus =
+  | "Requested"
+  | "Assistance Offered"
+  | "Partially Filled"
+  | "Confirmed"
+  | "Fulfilled"
+  | "Cancelled"
+  | "Closed";
+
+export type BackupOfferStatus = "Offered" | "Approved" | "Declined" | "Withdrawn";
+
+export type BackupAssistanceType =
+  | "Medical Responders"
+  | "Fire Responders"
+  | "Police / Public Safety Personnel"
+  | "Rescue Personnel"
+  | "Barangay Emergency Responders"
+  | "Additional General Responders"
+  | "Equipment or Vehicle Support";
 
 export type ResponderStatus =
   | "Available"
@@ -54,7 +83,11 @@ export interface Incident {
   nodeLocation?: string;
   coordinates?: string;
   assignedResponder: string;
-  priority: IncidentPriority;
+  alertLevel: AlertLevel;
+  alertLevelUpdatedAt?: string;
+  alertLevelUpdatedBy?: string;
+  alertLevelUpdateSource?: AlertLevelUpdateSource;
+  alertLevelUpdateReason?: string;
   buzzerActive?: boolean;
   buzzerUpdatedAt?: string;
   fieldNoteCount?: number;
@@ -66,6 +99,48 @@ export interface Incident {
   validationStatus?: ValidationStatus;
   voiceTranscript?: string;
   voiceUrl?: string;
+  activityHistory?: IncidentActivity[];
+  backupRequest?: BackupRequest;
+}
+
+export interface IncidentActivity {
+  id: string;
+  type: "Alert Level" | "Status" | "Backup" | "Assignment";
+  message: string;
+  actorName?: string;
+  actorRole?: string;
+  source?: AlertLevelUpdateSource;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface BackupOffer {
+  id: string;
+  responderId: string;
+  responderName: string;
+  responderAvailability: ResponderStatus;
+  status: BackupOfferStatus;
+  offeredAt: string;
+  decidedAt?: string;
+  decisionNote?: string;
+}
+
+export interface BackupRequest {
+  id: string;
+  incidentId: string;
+  status: BackupRequestStatus;
+  requestedAt: string;
+  requestedBy: string;
+  requestingTeam: string;
+  assistanceTypes: BackupAssistanceType[];
+  respondersNeeded: number;
+  reason: string;
+  urgency: Exclude<AlertLevel, "Unassessed">;
+  offers: BackupOffer[];
+  confirmedResponders: BackupOffer[];
+  fulfilledAt?: string;
+  cancelledAt?: string;
+  cancellationReason?: string;
 }
 
 export interface FieldNote {

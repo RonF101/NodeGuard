@@ -23,7 +23,7 @@ class StatusUpdateSheet extends StatefulWidget {
 }
 
 class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
-  late IncidentStatus _selectedStatus = widget.incident.status;
+  late IncidentStatus _selectedStatus;
   final _remarksController = TextEditingController();
   bool _isSubmitting = false;
   bool _draftSaved = false;
@@ -36,6 +36,8 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
   @override
   void initState() {
     super.initState();
+    final options = responderStatusTransitions(widget.incident.status);
+    _selectedStatus = options.isEmpty ? widget.incident.status : options.first;
     _remarksController.addListener(_scheduleDraftSave);
     unawaited(_restoreDraft());
   }
@@ -52,12 +54,16 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
       final restoredStatus = IncidentStatus.values.where(
         (item) => item.name == statusName,
       );
+      final validOptions = responderStatusTransitions(widget.incident.status);
       if (!mounted) return;
       _restoringDraft = true;
       _remarksController.text = data['remarks'] as String? ?? '';
       _restoringDraft = false;
       setState(() {
-        if (restoredStatus.isNotEmpty) _selectedStatus = restoredStatus.first;
+        if (restoredStatus.isNotEmpty &&
+            validOptions.contains(restoredStatus.first)) {
+          _selectedStatus = restoredStatus.first;
+        }
         _draftSaved = true;
       });
     } on FormatException {
@@ -134,14 +140,6 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
   }
 
   Future<void> _submit() async {
-    if (_selectedStatus == IncidentStatus.needBackup &&
-        _remarksController.text.trim().isEmpty) {
-      setState(() {
-        _error =
-            'Describe the additional personnel, vehicle, or equipment needed.';
-      });
-      return;
-    }
     if (_selectedStatus == IncidentStatus.resolved &&
         !await _confirmResolvedStatus()) {
       return;
@@ -178,14 +176,7 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
 
   @override
   Widget build(BuildContext context) {
-    const options = [
-      IncidentStatus.assigned,
-      IncidentStatus.enRoute,
-      IncidentStatus.onScene,
-      IncidentStatus.responding,
-      IncidentStatus.resolved,
-      IncidentStatus.needBackup,
-    ];
+    final options = responderStatusTransitions(widget.incident.status);
 
     return SafeArea(
       child: Padding(
@@ -210,7 +201,7 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text('Update Response Status',
+              Text('Next Response Step',
                   style: Theme.of(context)
                       .textTheme
                       .titleLarge
@@ -219,6 +210,11 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
               Text(widget.incident.id,
                   style: const TextStyle(
                       color: AppColors.mutedText, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text(
+                'Current status: ${widget.incident.status.label}',
+                style: const TextStyle(color: AppColors.mutedText),
+              ),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 8,
@@ -302,5 +298,24 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
         ),
       ),
     );
+  }
+}
+
+List<IncidentStatus> responderStatusTransitions(IncidentStatus current) {
+  switch (current) {
+    case IncidentStatus.assigned:
+      return const [IncidentStatus.enRoute];
+    case IncidentStatus.enRoute:
+      return const [IncidentStatus.onScene];
+    case IncidentStatus.onScene:
+      return const [IncidentStatus.responding, IncidentStatus.resolved];
+    case IncidentStatus.responding:
+    case IncidentStatus.needBackup:
+      return const [IncidentStatus.resolved];
+    case IncidentStatus.newAlert:
+    case IncidentStatus.resolved:
+    case IncidentStatus.closed:
+    case IncidentStatus.falseAlert:
+      return const [];
   }
 }

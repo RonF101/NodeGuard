@@ -13,6 +13,7 @@ import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
 import Grid from "@mui/material/Grid";
 import InputAdornment from "@mui/material/InputAdornment";
@@ -20,7 +21,11 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { BrandLogo } from "@/components/BrandLogo";
-import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabaseClient";
+import {
+  getSupabaseClient,
+  isNodeGuardDemoMode,
+  isSupabaseConfigured,
+} from "@/lib/supabaseClient";
 import { mdrrmoPalette } from "@/theme/theme";
 
 export default function LoginPage() {
@@ -30,15 +35,21 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const demoMode = isNodeGuardDemoMode();
   const configured = isSupabaseConfigured();
 
   useEffect(() => {
+    if (demoMode) {
+      router.replace("/dashboard");
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) return;
     void supabase.auth.getSession().then(({ data }) => {
       if (data.session) router.replace("/dashboard");
     });
-  }, [router]);
+  }, [demoMode, router]);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -75,6 +86,25 @@ export default function LoginPage() {
 
     router.push("/dashboard");
   };
+
+  if (demoMode) {
+    return (
+      <Stack
+        spacing={2}
+        sx={{
+          minHeight: "100vh",
+          alignItems: "center",
+          justifyContent: "center",
+          bgcolor: "background.default",
+        }}
+      >
+        <CircularProgress color="secondary" />
+        <Typography color="text.secondary" sx={{ fontWeight: 700 }}>
+          Opening the NodeGuard public demo...
+        </Typography>
+      </Stack>
+    );
+  }
 
   return (
     <Box

@@ -15,7 +15,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _emailController =
+      TextEditingController(text: 'responder@nodeguard.local');
   final _passwordController = TextEditingController();
   bool _isSubmitting = false;
   bool _obscurePassword = true;
@@ -76,10 +77,31 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const MainShell()));
-    } catch (error) {
+    } on AuthException catch (error) {
+      if (!mounted) return;
+      final message = error.message.contains('active, linked')
+          ? error.message
+          : 'The email or password is incorrect. Check the responder account and try again.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } on PostgrestException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Login failed: $error')),
+        const SnackBar(
+          content: Text(
+            'NodeGuard could not verify the responder profile. Check the connection and try again.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'NodeGuard could not sign in. Check the connection and try again.',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -148,6 +170,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 28),
                     TextFormField(
                       controller: _emailController,
+                      autofillHints: const [AutofillHints.username],
                       keyboardType: TextInputType.emailAddress,
                       decoration: const InputDecoration(
                         labelText: 'Email',
@@ -165,6 +188,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 14),
                     TextFormField(
                       controller: _passwordController,
+                      autofillHints: const [AutofillHints.password],
                       obscureText: _obscurePassword,
                       decoration: InputDecoration(
                         labelText: 'Password',

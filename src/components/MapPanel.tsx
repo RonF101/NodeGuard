@@ -34,7 +34,7 @@ function getNodeColor(incident?: Incident) {
   if (!incident || ["Resolved", "Closed", "False Alert"].includes(incident.status)) {
     return mdrrmoPalette.successGreen;
   }
-  if (["On Scene", "Responding"].includes(incident.status) || incident.priority === "Critical") {
+  if (["On Scene", "Responding"].includes(incident.status) || incident.alertLevel === "Critical") {
     return mdrrmoPalette.goRed;
   }
   return categoryColors[incident.category];

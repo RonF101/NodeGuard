@@ -66,8 +66,16 @@ class LocalSyncQueue {
   }
 
   Future<int> add(PendingStatusUpdate update) async {
-    final items = await load()
-      ..add(update);
+    final items = await load();
+    final duplicateIndex = items.indexWhere(
+      (item) =>
+          item.publicId == update.publicId && item.status == update.status,
+    );
+    if (duplicateIndex >= 0) {
+      items[duplicateIndex] = update;
+    } else {
+      items.add(update);
+    }
     await save(items);
     return items.length;
   }

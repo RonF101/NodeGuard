@@ -5,13 +5,12 @@ import type { IncidentStatus } from "@/types";
 
 type WorkflowStatus = Extract<
   IncidentStatus,
-  "Responding" | "On Scene" | "Resolved" | "Closed"
+  "Responding" | "On Scene" | "Closed"
 >;
 
 const allowedStatuses: WorkflowStatus[] = [
   "Responding",
   "On Scene",
-  "Resolved",
   "Closed",
 ];
 

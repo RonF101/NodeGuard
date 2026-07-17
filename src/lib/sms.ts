@@ -48,7 +48,7 @@ export async function sendAssignmentSms(
         to: responder.contact_number,
         recipient: responder.name,
         incidentId: incident.public_id,
-        message: `[NodeGuard] ${incident.public_id}: ${incident.category} at ${incident.location_name}. Priority: ${incident.priority}. Open the personnel app for details.`,
+        message: `[NodeGuard] ${incident.public_id}: ${incident.category} at ${incident.location_name}. Alert level: ${incident.priority === "medium" ? "Moderate" : incident.priority.replaceAll("_", " ")}. Open the personnel app for details.`,
       }),
       signal: AbortSignal.timeout(8000),
     });

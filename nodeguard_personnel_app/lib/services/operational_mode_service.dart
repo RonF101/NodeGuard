@@ -19,11 +19,13 @@ class OperationalModeService extends ChangeNotifier {
   bool _connectionAvailable = true;
   bool _manualLowBandwidth = false;
   int _pendingCount = 0;
+  DateTime? _lastSyncedAt;
 
   bool get online => _connectionAvailable;
   bool get manualLowBandwidth => _manualLowBandwidth;
   bool get lowBandwidth => online && _manualLowBandwidth;
   int get pendingCount => _pendingCount;
+  DateTime? get lastSyncedAt => _lastSyncedAt;
   OperationalMode get mode => !online
       ? OperationalMode.offline
       : lowBandwidth
@@ -57,6 +59,11 @@ class OperationalModeService extends ChangeNotifier {
   void setPendingCount(int count) {
     if (_pendingCount == count) return;
     _pendingCount = count;
+    notifyListeners();
+  }
+
+  void markSynced([DateTime? value]) {
+    _lastSyncedAt = value ?? DateTime.now();
     notifyListeners();
   }
 }

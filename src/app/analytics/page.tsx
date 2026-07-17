@@ -27,7 +27,7 @@ function toAnalyticsIncident(incident: Incident): AnalyticsIncident {
     status: incident.status,
     validationStatus,
     assignedResponder: incident.assignedResponder,
-    priority: incident.priority,
+    priority: incident.alertLevel,
     isFalseAlarm: validationStatus === "False Alarm",
     responseTimeMinutes: incident.responseTimeMinutes ?? 0,
   };

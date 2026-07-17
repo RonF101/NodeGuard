@@ -2,8 +2,12 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 let cachedClient: SupabaseClient | null = null;
 
+export function isNodeGuardDemoMode() {
+  return process.env.NEXT_PUBLIC_NODEGUARD_DEMO_MODE === "true";
+}
+
 export function isSupabaseConfigured() {
-  if (process.env.NEXT_PUBLIC_NODEGUARD_DEMO_MODE === "true") return false;
+  if (isNodeGuardDemoMode()) return false;
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 }
 

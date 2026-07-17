@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../models/incident.dart';
+import '../models/backup_request.dart';
 import '../theme/app_colors.dart';
-import 'priority_chip.dart';
+import 'alert_level_chip.dart';
 import 'status_chip.dart';
 
 class IncidentCard extends StatelessWidget {
@@ -62,42 +63,33 @@ class IncidentCard extends StatelessWidget {
             const SizedBox(height: 12),
             _InfoLine(icon: Icons.place_outlined, text: incident.locationName),
             _InfoLine(
-                icon: Icons.confirmation_number_outlined,
-                text: incident.deviceId),
-            _InfoLine(
-                icon: Icons.schedule_outlined,
-                text: formatDateTime(incident.timestamp)),
-            _InfoLine(
-              icon: incident.voiceContextAvailable
-                  ? Icons.graphic_eq_outlined
-                  : Icons.volume_off_outlined,
-              text: incident.voiceContextAvailable
-                  ? 'Voice context available'
-                  : 'No voice context',
+              icon: Icons.schedule_outlined,
+              text: formatDateTime(incident.timestamp),
             ),
-            const SizedBox(height: 10),
-            Text(
-              incident.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.mutedText),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 6,
               children: [
-                PriorityChip(priority: incident.priority),
+                AlertLevelChip(alertLevel: incident.alertLevel),
                 StatusChip(status: incident.status),
               ],
             ),
             const SizedBox(height: 12),
+            _InfoLine(
+                icon: Icons.groups_outlined,
+                text:
+                    '${incident.assignedResponder} · ${incident.assignedUnit}'),
+            if (incident.backupRequest != null)
+              _InfoLine(
+                  icon: Icons.group_add_outlined,
+                  text: 'Backup: ${incident.backupRequest!.status.label}'),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
                 onPressed: onViewDetails,
                 icon: const Icon(Icons.open_in_new_outlined),
-                label: const Text('View Details'),
+                label: const Text('View Assignment'),
               ),
             ),
           ],

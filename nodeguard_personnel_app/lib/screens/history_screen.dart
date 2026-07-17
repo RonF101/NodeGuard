@@ -4,7 +4,7 @@ import '../models/incident.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_layout.dart';
 import '../widgets/incident_card.dart';
-import '../widgets/priority_chip.dart';
+import '../widgets/alert_level_chip.dart';
 import '../widgets/status_chip.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -23,12 +23,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final completed = widget.incidents.where((incident) {
+    final today = DateTime.now();
+    final completed =
+        sortIncidentsByAlertLevel(widget.incidents.where((incident) {
       if (!incident.isCompleted) {
         return false;
       }
-      if (_dateFilter == 'Today' && incident.timestamp.day != 6) {
-        return false;
+      if (_dateFilter == 'Today') {
+        final reported = incident.timestamp.toLocal();
+        if (reported.year != today.year ||
+            reported.month != today.month ||
+            reported.day != today.day) {
+          return false;
+        }
       }
       if (_categoryFilter != null && incident.category != _categoryFilter) {
         return false;
@@ -37,7 +44,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return false;
       }
       return true;
-    }).toList();
+    }));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Incident History')),
@@ -173,7 +180,7 @@ class _HistoryCard extends StatelessWidget {
             Text(
                 '${incident.locationName} - ${formatDateTime(incident.timestamp)}'),
             const SizedBox(height: 8),
-            PriorityChip(priority: incident.priority),
+            AlertLevelChip(alertLevel: incident.alertLevel),
             const SizedBox(height: 8),
             Text(
               incident.notes.isEmpty

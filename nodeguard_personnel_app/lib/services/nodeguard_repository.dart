@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../data/mock_incidents.dart';
 import '../data/mock_responder.dart';
 import '../models/incident.dart';
+import '../models/alert_level.dart';
+import '../models/backup_request.dart';
 import '../models/responder.dart';
 import 'supabase_service.dart';
 
@@ -13,6 +15,63 @@ class NodeGuardDataException implements Exception {
 
   @override
   String toString() => message;
+}
+
+enum IncidentStatusUpdateOutcome { saved, retryLater, rejected }
+
+class IncidentStatusUpdateResult {
+  const IncidentStatusUpdateResult._(this.outcome, this.message);
+
+  const IncidentStatusUpdateResult.saved()
+      : this._(IncidentStatusUpdateOutcome.saved, null);
+
+  const IncidentStatusUpdateResult.retryLater(String message)
+      : this._(IncidentStatusUpdateOutcome.retryLater, message);
+
+  const IncidentStatusUpdateResult.rejected(String message)
+      : this._(IncidentStatusUpdateOutcome.rejected, message);
+
+  final IncidentStatusUpdateOutcome outcome;
+  final String? message;
+
+  bool get saved => outcome == IncidentStatusUpdateOutcome.saved;
+  bool get shouldRetry => outcome == IncidentStatusUpdateOutcome.retryLater;
+}
+
+bool isCurrentResponderAssignment(
+  Map<String, dynamic> row,
+  String responderName,
+) {
+  if (row['assigned_responder_name'] == responderName) return true;
+  if (const {'resolved', 'closed', 'false_alert'}.contains(row['status'])) {
+    return false;
+  }
+
+  final requests = row['backup_requests'];
+  if (requests is! List) return false;
+  for (final request in requests.whereType<Map>()) {
+    final offers = request['backup_offers'];
+    if (offers is! List) continue;
+    for (final offer in offers.whereType<Map>()) {
+      final responder = offer['responders'];
+      if (offer['status'] == 'approved' &&
+          responder is Map &&
+          responder['name'] == responderName) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+String normalizeCurrentAssignment(dynamic value) {
+  final assignment = value?.toString().trim() ?? '';
+  if (assignment.isEmpty ||
+      assignment.toLowerCase() == 'none' ||
+      assignment.toLowerCase() == 'no active assignment') {
+    return 'No active assignment';
+  }
+  return assignment;
 }
 
 class NodeGuardRepository {
@@ -33,7 +92,10 @@ class NodeGuardRepository {
         client: client,
         assignedResponderName: assignedResponderName,
       );
-      return Future.wait(rows.map((row) => _incidentFromRow(row, client)));
+      final incidents = await Future.wait(
+        rows.map((row) => _incidentFromRow(row, client)),
+      );
+      return sortIncidentsByAlertLevel(incidents);
     } on PostgrestException catch (error) {
       throw NodeGuardDataException(
         'Unable to load live incidents: ${error.message}',
@@ -73,13 +135,21 @@ class NodeGuardRepository {
     required String columns,
     String? assignedResponderName,
   }) {
-    var query = client.from('incidents').select(columns);
-    if (assignedResponderName != null) {
-      query = query.eq('assigned_responder_name', assignedResponderName);
-    }
-    return query.order('occurred_at', ascending: false).then(
-          (rows) => rows.map(Map<String, dynamic>.from).toList(),
-        );
+    return client
+        .from('incidents')
+        .select(columns)
+        .order('occurred_at', ascending: false)
+        .then((rows) {
+      final mapped = rows.map(Map<String, dynamic>.from).toList();
+      if (assignedResponderName == null) return mapped;
+      return mapped
+          .where((row) => _isRowAssignedTo(row, assignedResponderName))
+          .toList();
+    });
+  }
+
+  bool _isRowAssignedTo(Map<String, dynamic> row, String responderName) {
+    return isCurrentResponderAssignment(row, responderName);
   }
 
   Future<Responder> fetchResponder() async {
@@ -105,31 +175,27 @@ class NodeGuardRepository {
     }
   }
 
-  Future<bool> submitIncidentStatusUpdate({
+  Future<IncidentStatusUpdateResult> submitIncidentStatusUpdate({
     required String publicId,
     required IncidentStatus status,
     required String remarks,
   }) async {
     final client = SupabaseService.client;
-    if (client == null) return true;
+    if (client == null) return const IncidentStatusUpdateResult.saved();
 
     try {
-      final incident = await client
-          .from('incidents')
-          .select('id')
-          .eq('public_id', publicId)
-          .maybeSingle();
-      if (incident == null) return false;
-
-      await client.from('incident_status_updates').insert({
-        'incident_id': incident['id'],
-        'status': _statusToDb(status),
-        'remarks': remarks.isEmpty ? null : remarks,
-        'created_by': client.auth.currentUser?.id,
+      await client.rpc('update_nodeguard_incident_status', params: {
+        'p_incident_public_id': publicId,
+        'p_status': _statusToDb(status),
+        'p_remarks': remarks.trim().isEmpty ? null : remarks.trim(),
       });
-      return true;
-    } on PostgrestException {
-      return false;
+      return const IncidentStatusUpdateResult.saved();
+    } on PostgrestException catch (error) {
+      return IncidentStatusUpdateResult.rejected(error.message);
+    } catch (_) {
+      return const IncidentStatusUpdateResult.retryLater(
+        'The update could not reach NodeGuard. It will retry when the connection is stable.',
+      );
     }
   }
 
@@ -174,6 +240,121 @@ class NodeGuardRepository {
     }
   }
 
+  Future<void> updateAlertLevel({
+    required String publicId,
+    required IncidentAlertLevel alertLevel,
+    String? reason,
+  }) async {
+    final client = SupabaseService.client;
+    if (client == null) return;
+    try {
+      await client.rpc('update_nodeguard_alert_level', params: {
+        'p_incident_public_id': publicId,
+        'p_alert_level': alertLevel.databaseValue,
+        'p_source': 'personnel_app',
+        'p_reason': reason?.trim().isEmpty ?? true ? null : reason!.trim(),
+      });
+    } on PostgrestException catch (error) {
+      throw NodeGuardDataException(error.message);
+    }
+  }
+
+  Future<String> requestBackup({
+    required String publicId,
+    required List<BackupAssistanceType> assistanceTypes,
+    required int respondersNeeded,
+    required String reason,
+    required IncidentAlertLevel urgency,
+  }) async {
+    final client = SupabaseService.client;
+    if (client == null) {
+      return 'mock-backup-${DateTime.now().millisecondsSinceEpoch}';
+    }
+    try {
+      final result = await client.rpc('request_nodeguard_backup', params: {
+        'p_incident_public_id': publicId,
+        'p_assistance_types':
+            assistanceTypes.map((type) => type.databaseValue).toList(),
+        'p_responders_needed': respondersNeeded,
+        'p_reason': reason.trim(),
+        'p_urgency':
+            urgency == IncidentAlertLevel.moderate ? 'moderate' : urgency.name,
+        'p_source': 'personnel_app',
+      });
+      final data = result is Map ? Map<String, dynamic>.from(result) : null;
+      return data?['id'] as String? ?? 'backup-request';
+    } on PostgrestException catch (error) {
+      throw NodeGuardDataException(error.message);
+    }
+  }
+
+  Future<void> offerBackupAssistance(String requestId) async {
+    final client = SupabaseService.client;
+    if (client == null) return;
+    try {
+      await client.rpc('offer_nodeguard_backup', params: {
+        'p_backup_request_id': requestId,
+      });
+    } on PostgrestException catch (error) {
+      throw NodeGuardDataException(error.message);
+    }
+  }
+
+  Future<void> cancelBackupRequest({
+    required String requestId,
+    required String reason,
+  }) async {
+    final client = SupabaseService.client;
+    if (client == null) return;
+    try {
+      await client.rpc('cancel_nodeguard_backup_request', params: {
+        'p_backup_request_id': requestId,
+        'p_reason': reason.trim(),
+      });
+    } on PostgrestException catch (error) {
+      throw NodeGuardDataException(error.message);
+    }
+  }
+
+  Future<int> fetchUnreadBackupNotificationCount() async {
+    final client = SupabaseService.client;
+    if (client == null) return 0;
+    try {
+      final rows = await client
+          .from('notifications')
+          .select('id')
+          .eq('is_read', false)
+          .inFilter('type', const [
+        'backup_requested',
+        'backup_offer',
+        'backup_confirmed',
+        'backup_updated',
+      ]);
+      return rows.length;
+    } on PostgrestException {
+      return 0;
+    }
+  }
+
+  Future<void> markBackupNotificationsRead() async {
+    final client = SupabaseService.client;
+    if (client == null) return;
+    try {
+      await client
+          .from('notifications')
+          .update({'is_read': true})
+          .eq('is_read', false)
+          .inFilter('type', const [
+            'backup_requested',
+            'backup_offer',
+            'backup_confirmed',
+            'backup_updated',
+          ]);
+    } on PostgrestException {
+      return;
+    }
+  }
+
   Future<Incident> _incidentFromRow(
     Map<String, dynamic> row,
     SupabaseClient client,
@@ -204,7 +385,14 @@ class NodeGuardRepository {
           row['node_location'] as String? ?? 'Node location unavailable',
       timestamp: DateTime.tryParse(row['occurred_at'] as String? ?? '') ??
           DateTime.now(),
-      priority: _priorityFromDb(row['priority'] as String?),
+      alertLevel: alertLevelFromDatabase(row['priority'] as String?),
+      alertLevelUpdatedAt:
+          DateTime.tryParse(row['priority_updated_at'] as String? ?? ''),
+      alertLevelUpdatedBy: _latestPriorityActor(row),
+      alertLevelUpdateSource: _alertLevelSourceLabel(
+        row['priority_update_source'] as String?,
+      ),
+      alertLevelUpdateReason: row['priority_update_reason'] as String?,
       status: status,
       voiceContextAvailable:
           row['voice_context_available'] as bool? ?? voice != null,
@@ -212,6 +400,7 @@ class NodeGuardRepository {
       assignedUnit: row['assigned_unit'] as String? ?? 'Unassigned unit',
       assignedResponder:
           row['assigned_responder_name'] as String? ?? 'Unassigned responder',
+      assignedResponders: _assignedResponderNames(row),
       description:
           row['caller_context'] as String? ?? 'No field context available.',
       coordinates: row['coordinates'] as String? ?? 'Coordinates unavailable',
@@ -225,6 +414,11 @@ class NodeGuardRepository {
           DateTime.tryParse(device?['buzzer_updated_at'] as String? ?? ''),
       voiceUrl: voiceUrl,
       voiceTranscript: voice?['transcript'] as String?,
+      activityHistory: [
+        ..._priorityHistoryFromRow(row),
+        ..._activityEventsFromRow(row),
+      ],
+      backupRequest: _backupRequestFromRow(row),
     );
   }
 
@@ -272,8 +466,7 @@ class NodeGuardRepository {
       contactNumber:
           row['contact_number'] as String? ?? mockResponder.contactNumber,
       availability: _availabilityFromDb(row['availability'] as String?),
-      currentAssignment:
-          row['current_assignment'] as String? ?? 'No active assignment',
+      currentAssignment: normalizeCurrentAssignment(row['current_assignment']),
     );
   }
 
@@ -290,18 +483,194 @@ class NodeGuardRepository {
     }
   }
 
-  IncidentPriority _priorityFromDb(String? value) {
+  List<String> _assignedResponderNames(Map<String, dynamic> row) {
+    final names = <String>{};
+    final primary = row['assigned_responder_name'];
+    if (primary is String && primary.isNotEmpty) names.add(primary);
+    final assignments = row['incident_assignments'];
+    if (assignments is List) {
+      for (final assignment in assignments.whereType<Map>()) {
+        final responders = assignment['responders'];
+        if (responders is Map && responders['name'] is String) {
+          names.add(responders['name'] as String);
+        } else if (responders is List) {
+          for (final responder in responders.whereType<Map>()) {
+            if (responder['name'] is String) {
+              names.add(responder['name'] as String);
+            }
+          }
+        }
+      }
+    }
+    return names.toList();
+  }
+
+  String? _latestPriorityActor(Map<String, dynamic> row) {
+    final updates = row['incident_priority_updates'];
+    if (updates is! List || updates.isEmpty) return null;
+    final sorted = updates.whereType<Map>().toList()
+      ..sort((a, b) => (b['created_at'] as String? ?? '')
+          .compareTo(a['created_at'] as String? ?? ''));
+    return sorted.isEmpty ? null : sorted.first['actor_name'] as String?;
+  }
+
+  String? _alertLevelSourceLabel(String? value) {
+    if (value == 'dashboard') return 'Dashboard';
+    if (value == 'personnel_app') return 'Personnel Application';
+    if (value == 'device') return 'Device';
+    return null;
+  }
+
+  List<String> _priorityHistoryFromRow(Map<String, dynamic> row) {
+    final updates = row['incident_priority_updates'];
+    if (updates is! List) return const [];
+    final sorted = updates.whereType<Map>().toList()
+      ..sort((a, b) => (b['created_at'] as String? ?? '')
+          .compareTo(a['created_at'] as String? ?? ''));
+    return sorted.map((update) {
+      final previous =
+          alertLevelFromDatabase(update['previous_priority'] as String?).label;
+      final next =
+          alertLevelFromDatabase(update['new_priority'] as String?).label;
+      final actor = update['actor_name'] as String? ?? 'NodeGuard user';
+      final role = update['actor_role'] as String? ?? 'Authorized personnel';
+      final source =
+          _alertLevelSourceLabel(update['source'] as String?) ?? 'NodeGuard';
+      final reason = update['reason'] as String?;
+      return 'Alert level changed from $previous to $next by $actor, $role, at ${_formatTimestamp(update['created_at'] as String?)} via $source.${reason == null || reason.isEmpty ? '' : ' Reason: $reason'}';
+    }).toList();
+  }
+
+  List<String> _activityEventsFromRow(Map<String, dynamic> row) {
+    final events = row['incident_activity_events'];
+    if (events is! List) return const [];
+    final sorted = events.whereType<Map>().toList()
+      ..sort((a, b) => (b['created_at'] as String? ?? '')
+          .compareTo(a['created_at'] as String? ?? ''));
+    return sorted.map((event) {
+      final message =
+          event['message'] as String? ?? 'Incident activity updated.';
+      final actor = event['actor_name'] as String?;
+      final source = _alertLevelSourceLabel(event['source'] as String?) ??
+          (event['source'] == 'system' ? 'System' : 'NodeGuard');
+      final reason = event['reason'] as String?;
+      return '$message ${actor == null ? '' : 'By $actor. '}${_formatTimestamp(event['created_at'] as String?)} via $source.${reason == null || reason.isEmpty ? '' : ' Reason: $reason'}';
+    }).toList();
+  }
+
+  BackupRequest? _backupRequestFromRow(Map<String, dynamic> row) {
+    final requests = row['backup_requests'];
+    if (requests is! List || requests.isEmpty) return null;
+    final sorted = requests.whereType<Map>().toList()
+      ..sort((a, b) => (b['requested_at'] as String? ?? '')
+          .compareTo(a['requested_at'] as String? ?? ''));
+    final active = sorted.where((request) => const {
+          'requested',
+          'assistance_offered',
+          'partially_filled',
+          'confirmed',
+        }.contains(request['status']));
+    final request = active.isNotEmpty ? active.first : sorted.first;
+    final offers = request['backup_offers'] is List
+        ? (request['backup_offers'] as List)
+            .whereType<Map>()
+            .map(_backupOfferFromRow)
+            .toList()
+        : <BackupOffer>[];
+    return BackupRequest(
+      id: request['id'] as String? ?? '',
+      incidentId: row['public_id'] as String? ?? '',
+      status: _backupRequestStatusFromDb(request['status'] as String?),
+      requestedAt:
+          DateTime.tryParse(request['requested_at'] as String? ?? '') ??
+              DateTime.now(),
+      requestedBy: request['requested_by'] as String? ?? '',
+      requestingTeam: request['requesting_team'] as String? ?? 'Unknown team',
+      assistanceTypes: (request['assistance_types'] as List? ?? const [])
+          .whereType<String>()
+          .map(_assistanceTypeFromDb)
+          .toList(),
+      respondersNeeded: request['responders_needed'] as int? ?? 1,
+      reason: request['reason'] as String? ?? 'No reason provided.',
+      urgency: alertLevelFromDatabase(request['urgency'] as String?),
+      offers: offers,
+      fulfilledAt: DateTime.tryParse(request['fulfilled_at'] as String? ?? ''),
+      cancelledAt: DateTime.tryParse(request['cancelled_at'] as String? ?? ''),
+      cancellationReason: request['cancellation_reason'] as String?,
+    );
+  }
+
+  BackupOffer _backupOfferFromRow(Map<dynamic, dynamic> row) {
+    final responderValue = row['responders'];
+    final responder = responderValue is Map
+        ? responderValue
+        : responderValue is List &&
+                responderValue.isNotEmpty &&
+                responderValue.first is Map
+            ? responderValue.first as Map
+            : const <String, dynamic>{};
+    return BackupOffer(
+      id: row['id'] as String? ?? '',
+      responderId: row['responder_id'] as String? ?? '',
+      responderName: responder['name'] as String? ?? 'Unknown responder',
+      responderAvailability: (responder['availability'] as String? ?? 'offline')
+          .replaceAll('_', ' '),
+      status: _backupOfferStatusFromDb(row['status'] as String?),
+      offeredAt: DateTime.tryParse(row['offered_at'] as String? ?? '') ??
+          DateTime.now(),
+      decidedAt: DateTime.tryParse(row['decided_at'] as String? ?? ''),
+      decisionNote: row['decision_note'] as String?,
+    );
+  }
+
+  BackupRequestStatus _backupRequestStatusFromDb(String? value) {
     switch (value) {
-      case 'critical':
-        return IncidentPriority.critical;
-      case 'high':
-        return IncidentPriority.high;
-      case 'medium':
-        return IncidentPriority.medium;
-      case 'low':
-        return IncidentPriority.low;
+      case 'assistance_offered':
+        return BackupRequestStatus.assistanceOffered;
+      case 'partially_filled':
+        return BackupRequestStatus.partiallyFilled;
+      case 'confirmed':
+        return BackupRequestStatus.confirmed;
+      case 'fulfilled':
+        return BackupRequestStatus.fulfilled;
+      case 'cancelled':
+        return BackupRequestStatus.cancelled;
+      case 'closed':
+        return BackupRequestStatus.closed;
       default:
-        return IncidentPriority.medium;
+        return BackupRequestStatus.requested;
+    }
+  }
+
+  BackupOfferStatus _backupOfferStatusFromDb(String? value) {
+    switch (value) {
+      case 'approved':
+        return BackupOfferStatus.approved;
+      case 'declined':
+        return BackupOfferStatus.declined;
+      case 'withdrawn':
+        return BackupOfferStatus.withdrawn;
+      default:
+        return BackupOfferStatus.offered;
+    }
+  }
+
+  BackupAssistanceType _assistanceTypeFromDb(String value) {
+    switch (value) {
+      case 'medical':
+        return BackupAssistanceType.medical;
+      case 'fire':
+        return BackupAssistanceType.fire;
+      case 'police_public_safety':
+        return BackupAssistanceType.policePublicSafety;
+      case 'rescue':
+        return BackupAssistanceType.rescue;
+      case 'barangay':
+        return BackupAssistanceType.barangay;
+      case 'equipment_vehicle':
+        return BackupAssistanceType.equipmentVehicle;
+      default:
+        return BackupAssistanceType.general;
     }
   }
 
@@ -402,6 +771,10 @@ device_id,
 node_location,
 occurred_at,
 priority,
+priority_updated_at,
+priority_updated_by,
+priority_update_source,
+priority_update_reason,
 status,
 voice_context_available,
 voice_duration,
@@ -410,6 +783,10 @@ assigned_responder_name,
 caller_context,
 coordinates,
 incident_status_updates(remarks, status, created_at),
+incident_priority_updates(id, previous_priority, new_priority, actor_name, actor_role, source, reason, created_at),
+incident_activity_events(id, event_type, message, actor_name, actor_role, source, reason, created_at),
+incident_assignments(responder_id, responders(name, profile_id)),
+backup_requests(id, status, requested_at, requested_by, requesting_team, assistance_types, responders_needed, reason, urgency, fulfilled_at, cancelled_at, cancellation_reason, backup_offers(id, responder_id, status, offered_at, decided_at, decision_note, responders(name, availability))),
 device_locations(buzzer_active, buzzer_updated_at),
 voice_contexts(storage_path, transcript, duration_seconds)
 ''';

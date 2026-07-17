@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/backup_request.dart';
+import '../models/alert_level.dart';
 import '../models/incident.dart';
 import '../services/nodeguard_repository.dart';
 import '../services/operational_mode_service.dart';
+import '../services/supabase_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_layout.dart';
 import '../widgets/incident_card.dart';
-import '../widgets/map_placeholder.dart';
-import '../widgets/priority_chip.dart';
+import '../widgets/alert_level_chip.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/status_update_sheet.dart';
 import '../widgets/voice_context_card.dart';
+import '../widgets/alert_level_update_sheet.dart';
+import '../widgets/request_backup_sheet.dart';
 import 'map_screen.dart';
 
 class IncidentDetailsScreen extends StatefulWidget {
@@ -19,11 +24,13 @@ class IncidentDetailsScreen extends StatefulWidget {
     required this.incidentId,
     required this.incidents,
     required this.onIncidentStatusChanged,
+    this.onIncidentResolved,
   });
 
   final String incidentId;
   final List<Incident> incidents;
   final IncidentStatusUpdateCallback onIncidentStatusChanged;
+  final VoidCallback? onIncidentResolved;
 
   @override
   State<IncidentDetailsScreen> createState() => _IncidentDetailsScreenState();
@@ -32,11 +39,186 @@ class IncidentDetailsScreen extends StatefulWidget {
 class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
   final _repository = const NodeGuardRepository();
   bool _isTogglingBuzzer = false;
+  bool _isCancellingBackup = false;
+  RealtimeChannel? _realtimeChannel;
   late Incident _incident =
       widget.incidents.firstWhere((item) => item.id == widget.incidentId);
 
-  void _showStatusSheet() {
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToIncident();
+  }
+
+  @override
+  void didUpdateWidget(covariant IncidentDetailsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final matches =
+        widget.incidents.where((item) => item.id == widget.incidentId);
+    if (matches.isNotEmpty && matches.first != _incident) {
+      _incident = matches.first;
+    }
+  }
+
+  void _subscribeToIncident() {
+    final client = SupabaseService.client;
+    if (client == null) return;
+    _realtimeChannel = client
+        .channel('nodeguard-incident-details-${widget.incidentId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'incidents',
+          callback: (_) => _refreshIncident(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'incident_priority_updates',
+          callback: (_) => _refreshIncident(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'backup_requests',
+          callback: (_) => _refreshIncident(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'backup_offers',
+          callback: (_) => _refreshIncident(),
+        )
+        .subscribe();
+  }
+
+  Future<void> _refreshIncident() async {
+    try {
+      final incidents = await _repository.fetchIncidents();
+      final matches = incidents.where((item) => item.id == widget.incidentId);
+      if (!mounted || matches.isEmpty) return;
+      final next = matches.first;
+      final alertLevelChanged = next.alertLevel != _incident.alertLevel;
+      final previous = _incident.alertLevel;
+      setState(() => _incident = next);
+      if (alertLevelChanged) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Alert level changed from ${previous.label} to ${next.alertLevel.label} by another connected user.',
+            ),
+          ),
+        );
+      }
+    } on NodeGuardDataException {
+      return;
+    }
+  }
+
+  void _showAlertLevelSheet() {
     showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => AlertLevelUpdateSheet(
+        incident: _incident,
+        onUpdated: (incident) {
+          setState(() => _incident = incident);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Alert level confirmed as ${incident.alertLevel.label}.')),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showBackupSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => RequestBackupSheet(
+        incident: _incident,
+        onRequested: (incident) {
+          setState(() => _incident = incident);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Backup request sent. Eligible available personnel and MDRRMO coordination will receive the update.',
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _cancelBackup() async {
+    final request = _incident.backupRequest;
+    if (request == null) return;
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cancel backup request'),
+        content: TextField(
+          controller: controller,
+          maxLength: 500,
+          minLines: 2,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'Cancellation reason',
+            hintText: 'Explain why additional assistance is no longer needed',
+          ),
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Keep Request'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isNotEmpty) Navigator.pop(dialogContext, value);
+            },
+            child: const Text('Cancel Request'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (reason == null || !mounted) return;
+    setState(() => _isCancellingBackup = true);
+    try {
+      await _repository.cancelBackupRequest(
+          requestId: request.id, reason: reason);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Backup request cancelled.')),
+      );
+      await _refreshIncident();
+    } on NodeGuardDataException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } finally {
+      if (mounted) setState(() => _isCancellingBackup = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    final client = SupabaseService.client;
+    if (client != null && _realtimeChannel != null) {
+      client.removeChannel(_realtimeChannel!);
+    }
+    super.dispose();
+  }
+
+  Future<void> _showStatusSheet() async {
+    final wasCompleted = _incident.isCompleted;
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (_) => StatusUpdateSheet(
@@ -65,6 +247,9 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
         },
       ),
     );
+    if (!mounted || wasCompleted || !_incident.isCompleted) return;
+    widget.onIncidentResolved?.call();
+    Navigator.of(context).pop();
   }
 
   Future<void> _toggleBuzzer() async {
@@ -160,10 +345,50 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
         false;
   }
 
+  void _openMap() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MapScreen(
+          incidents: widget.incidents,
+          selectedIncident: _incident,
+          onIncidentStatusChanged: widget.onIncidentStatusChanged,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(_incident.id)),
+      bottomNavigationBar: _incident.isCompleted
+          ? null
+          : SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _openMap,
+                        icon: const Icon(Icons.map_outlined),
+                        label: const Text('View Map'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton.icon(
+                        onPressed: _showStatusSheet,
+                        icon: const Icon(Icons.update_outlined),
+                        label: const Text('Next Response Step'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
       body: ListView(
         padding: AppLayout.pagePadding(context),
         children: [
@@ -183,32 +408,78 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
           ),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 6, children: [
-            PriorityChip(priority: _incident.priority),
+            AlertLevelChip(alertLevel: _incident.alertLevel),
             StatusChip(status: _incident.status),
           ]),
-          const SizedBox(height: 14),
-          _SectionCard(
-            title: 'Incident Information',
+          const SizedBox(height: 12),
+          _AssignmentSummaryCard(incident: _incident),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Alert Level Assessment',
+                      style: TextStyle(fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Confirm urgency from current field conditions.',
+                    style: TextStyle(color: AppColors.mutedText),
+                  ),
+                  if (_incident.alertLevelUpdatedAt != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Last confirmed ${formatDateTime(_incident.alertLevelUpdatedAt!)}${_incident.alertLevelUpdatedBy == null ? '' : ' by ${_incident.alertLevelUpdatedBy}'}${_incident.alertLevelUpdateSource == null ? '' : ' via ${_incident.alertLevelUpdateSource}'}',
+                      style: const TextStyle(
+                          color: AppColors.mutedText,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          _incident.isCompleted ? null : _showAlertLevelSheet,
+                      icon: const Icon(Icons.tune_outlined),
+                      label: const Text('Update Alert Level'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          VoiceContextCard(incident: _incident),
+          const SizedBox(height: 12),
+          _BackupSection(
+            incident: _incident,
+            isCancelling: _isCancellingBackup,
+            onRequest: _showBackupSheet,
+            onCancel: _cancelBackup,
+          ),
+          const SizedBox(height: 12),
+          _CollapsibleSectionCard(
+            title: 'Incident & Location Details',
+            icon: Icons.info_outline,
             children: [
               _DetailRow(label: 'Device ID', value: _incident.deviceId),
               _DetailRow(label: 'Node Location', value: _incident.nodeLocation),
               _DetailRow(
-                  label: 'Timestamp',
+                  label: 'Reported',
                   value: formatDateTime(_incident.timestamp)),
-              _DetailRow(label: 'Assigned Unit', value: _incident.assignedUnit),
-              _DetailRow(
-                  label: 'Assigned Responder',
-                  value: _incident.assignedResponder),
-              _DetailRow(label: 'Location', value: _incident.locationName),
               _DetailRow(label: 'Address', value: _incident.approximateAddress),
               _DetailRow(label: 'Coordinates', value: _incident.coordinates),
             ],
           ),
           const SizedBox(height: 12),
-          VoiceContextCard(incident: _incident),
-          const SizedBox(height: 12),
-          _SectionCard(
+          _CollapsibleSectionCard(
             title: 'Node Buzzer',
+            icon: _incident.buzzerActive
+                ? Icons.notifications_active_outlined
+                : Icons.notifications_off_outlined,
+            initiallyExpanded: _incident.buzzerActive,
             children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -270,9 +541,11 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          _SectionCard(
-            title: 'Notes / Remarks',
-            children: _incident.notes
+          _CollapsibleSectionCard(
+            title:
+                'Activity & Notes (${_incident.activityHistory.length + _incident.notes.length})',
+            icon: Icons.history_outlined,
+            children: [..._incident.activityHistory, ..._incident.notes]
                 .map((note) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Row(
@@ -287,65 +560,212 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
                     ))
                 .toList(),
           ),
-          const SizedBox(height: 12),
-          Text('Location Preview',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 8),
-          MapPlaceholder(incident: _incident, compact: true),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => MapScreen(
-                    incidents: widget.incidents,
-                    selectedIncident: _incident,
-                    onIncidentStatusChanged: widget.onIncidentStatusChanged,
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.map_outlined),
-            label: const Text('View Location'),
-          ),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: _showStatusSheet,
-            icon: const Icon(Icons.update_outlined),
-            label: const Text('Update Response Status'),
-          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
 }
 
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.children});
+class _BackupSection extends StatelessWidget {
+  const _BackupSection({
+    required this.incident,
+    required this.isCancelling,
+    required this.onRequest,
+    required this.onCancel,
+  });
 
-  final String title;
-  final List<Widget> children;
+  final Incident incident;
+  final bool isCancelling;
+  final VoidCallback onRequest;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
+    final request = incident.backupRequest;
+    final active = request?.status.isActive ?? false;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w900)),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Backup Coordination',
+                      style: TextStyle(fontWeight: FontWeight.w900)),
+                ),
+                if (request != null)
+                  Chip(
+                      label: Text(request.status.label),
+                      visualDensity: VisualDensity.compact),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (request == null)
+              const Text('No backup has been requested for this assignment.',
+                  style: TextStyle(color: AppColors.mutedText))
+            else ...[
+              Text(request.reason,
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              Text(
+                '${request.assistanceTypes.map((type) => type.label).join(', ')}\n${request.respondersNeeded} requested · ${request.confirmedResponders.length} confirmed · ${request.offers.length} offered',
+                style: const TextStyle(color: AppColors.mutedText),
+              ),
+            ],
             const SizedBox(height: 10),
-            ...children,
+            if (!active && !incident.isCompleted)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: onRequest,
+                  icon: const Icon(Icons.group_add_outlined),
+                  label: const Text('Request Backup'),
+                ),
+              ),
+            if (active)
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: isCancelling ? null : onCancel,
+                  icon: const Icon(Icons.cancel_outlined),
+                  label: Text(
+                      isCancelling ? 'Cancelling...' : 'Cancel Backup Request'),
+                ),
+              ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AssignmentSummaryCard extends StatelessWidget {
+  const _AssignmentSummaryCard({required this.incident});
+
+  final Incident incident;
+
+  @override
+  Widget build(BuildContext context) {
+    final responder = incident.assignedResponder.trim();
+    final unit = incident.assignedUnit.trim();
+    final activeAssignment = responder.isNotEmpty &&
+        !responder.toLowerCase().startsWith('unassigned') &&
+        unit.isNotEmpty &&
+        !unit.toLowerCase().startsWith('unassigned');
+    final previousResponders = incident.assignedResponders
+        .where((name) => name != responder)
+        .toSet()
+        .toList();
+
+    return Card(
+      color: activeAssignment ? AppColors.setBlueSoft : null,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  activeAssignment
+                      ? Icons.groups_outlined
+                      : Icons.person_off_outlined,
+                  color: AppColors.setBlueDark,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        activeAssignment
+                            ? 'Current Response Assignment'
+                            : 'No Current Assignment',
+                        style: const TextStyle(
+                          color: AppColors.setBlueDark,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        activeAssignment ? responder : 'Awaiting dispatch',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                      Text(
+                        activeAssignment ? unit : 'No active unit assigned',
+                        style: const TextStyle(color: AppColors.mutedText),
+                      ),
+                    ],
+                  ),
+                ),
+                StatusChip(status: incident.status),
+              ],
+            ),
+            if (!activeAssignment && previousResponders.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Previously assigned: ${previousResponders.join(', ')}',
+                style: const TextStyle(
+                  color: AppColors.mutedText,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+            const Divider(height: 22),
+            Row(
+              children: [
+                const Icon(Icons.place_outlined,
+                    size: 18, color: AppColors.mediumGreen),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    '${incident.locationName} · ${formatDateTime(incident.timestamp)}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CollapsibleSectionCard extends StatelessWidget {
+  const _CollapsibleSectionCard({
+    required this.title,
+    required this.icon,
+    required this.children,
+    this.initiallyExpanded = false,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+  final bool initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
+        leading: Icon(icon, color: AppColors.setBlueDark),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
       ),
     );
   }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import FormControl from "@mui/material/FormControl";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
@@ -14,6 +15,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableSortLabel from "@mui/material/TableSortLabel";
+import Select from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
@@ -24,19 +26,21 @@ import VolumeUpOutlinedIcon from "@mui/icons-material/VolumeUpOutlined";
 import {
   formatPhilippineDateTime,
   formatRelativeTime,
-  incidentPriorityConfig,
   incidentStatusConfig,
   incidentStatusOrder,
   parseNodeGuardDate,
-  priorityOrder,
-  sortIncidentQueue,
 } from "@/config/incidentOperations";
-import { PriorityChip } from "@/components/PriorityChip";
+import {
+  alertLevelConfig,
+  alertLevelOrder,
+  sortIncidentsByAlertLevel,
+} from "@/config/alertLevels";
+import { AlertLevelChip } from "@/components/AlertLevelChip";
 import { StatusChip } from "@/components/StatusChip";
 import type {
   EmergencyCategory,
   Incident,
-  IncidentPriority,
+  AlertLevel,
   IncidentStatus,
 } from "@/types";
 
@@ -49,15 +53,11 @@ type IncidentTableProps = {
 };
 
 type SortKey =
-  | "queue"
   | "incident"
-  | "priority"
-  | "category"
-  | "location"
+  | "alertLevel"
   | "timestamp"
-  | "assignedResponder"
   | "status";
-type ColumnSortKey = Exclude<SortKey, "queue">;
+type ColumnSortKey = SortKey;
 
 const seenFieldNotesStorageKey = "nodeguard.seenFieldNotes";
 const seenFieldNotesChangedEvent = "nodeguard:seen-field-notes-changed";
@@ -94,14 +94,14 @@ function compareIncidents(a: Incident, b: Incident, key: ColumnSortKey) {
   if (key === "timestamp") {
     return parseNodeGuardDate(a.timestamp).getTime() - parseNodeGuardDate(b.timestamp).getTime();
   }
-  if (key === "priority") {
-    return incidentPriorityConfig[a.priority].order - incidentPriorityConfig[b.priority].order;
+  if (key === "alertLevel") {
+    return alertLevelConfig[a.alertLevel].rank - alertLevelConfig[b.alertLevel].rank;
   }
   if (key === "status") {
     return incidentStatusConfig[a.status].order - incidentStatusConfig[b.status].order;
   }
   if (key === "incident") return a.id.localeCompare(b.id);
-  return String(a[key]).localeCompare(String(b[key]));
+  return 0;
 }
 
 export function IncidentTable({
@@ -114,11 +114,11 @@ export function IncidentTable({
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<EmergencyCategory | "All">("All");
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | "All">(initialStatus);
-  const [priorityFilter, setPriorityFilter] = useState<IncidentPriority | "All">("All");
+  const [alertLevelFilter, setAlertLevelFilter] = useState<AlertLevel | "All">("All");
   const [locationFilter, setLocationFilter] = useState("All");
   const [teamFilter, setTeamFilter] = useState("All");
-  const [sortKey, setSortKey] = useState<SortKey>("queue");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [sortKey, setSortKey] = useState<SortKey>("alertLevel");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [relativeNow, setRelativeNow] = useState<number | null>(null);
 
   useEffect(() => {
@@ -143,10 +143,6 @@ export function IncidentTable({
     }
   }, [seenNoteKeysSnapshot]);
 
-  const categories = useMemo(
-    () => Array.from(new Set(incidents.map((incident) => incident.category))).toSorted(),
-    [incidents],
-  );
   const locations = useMemo(
     () => Array.from(new Set(incidents.map((incident) => incident.location))).toSorted(),
     [incidents],
@@ -174,21 +170,25 @@ export function IncidentTable({
         (!normalizedSearch || searchable.includes(normalizedSearch)) &&
         (categoryFilter === "All" || incident.category === categoryFilter) &&
         (statusFilter === "All" || incident.status === statusFilter) &&
-        (priorityFilter === "All" || incident.priority === priorityFilter) &&
+        (alertLevelFilter === "All" || incident.alertLevel === alertLevelFilter) &&
         (locationFilter === "All" || incident.location === locationFilter) &&
         (teamFilter === "All" || incident.assignedResponder === teamFilter)
       );
     });
-    if (sortKey === "queue") return sortIncidentQueue(filtered);
+    if (sortKey === "alertLevel") {
+      return sortIncidentsByAlertLevel(filtered, sortDirection === "asc");
+    }
     return filtered.toSorted((a, b) => {
       const comparison = compareIncidents(a, b, sortKey);
-      return sortDirection === "asc" ? comparison : -comparison;
+      if (comparison !== 0) return sortDirection === "asc" ? comparison : -comparison;
+      return parseNodeGuardDate(b.timestamp).getTime() - parseNodeGuardDate(a.timestamp).getTime()
+        || a.id.localeCompare(b.id);
     });
   }, [
     categoryFilter,
     incidents,
     locationFilter,
-    priorityFilter,
+    alertLevelFilter,
     search,
     sortDirection,
     sortKey,
@@ -202,18 +202,18 @@ export function IncidentTable({
       return;
     }
     setSortKey(nextKey);
-    setSortDirection("asc");
+    setSortDirection(nextKey === "alertLevel" ? "desc" : "asc");
   };
 
   const clearFilters = () => {
     setSearch("");
     setCategoryFilter("All");
     setStatusFilter("All");
-    setPriorityFilter("All");
+    setAlertLevelFilter("All");
     setLocationFilter("All");
     setTeamFilter("All");
-    setSortKey("queue");
-    setSortDirection("asc");
+    setSortKey("alertLevel");
+    setSortDirection("desc");
   };
 
   const handleViewUpdates = (incident: Incident) => {
@@ -243,7 +243,7 @@ export function IncidentTable({
     const count = incident.fieldNoteCount ?? 0;
     if (!count) return null;
     const unread = !seenNoteKeys.has(noteKeyFor(incident));
-    const urgent = unread && ["Critical", "High"].includes(incident.priority);
+    const urgent = unread && ["Critical", "High"].includes(incident.alertLevel);
     const tooltip = `${count} field update${count === 1 ? "" : "s"}. ${unread ? "Unread" : "Previously opened"}${urgent ? " and urgent." : "."}`;
     return (
       <Tooltip title={tooltip} arrow>
@@ -295,17 +295,26 @@ export function IncidentTable({
               fullWidth
               sx={{ gridColumn: { md: "span 2" } }}
             />
-            <TextField select label="Category" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as EmergencyCategory | "All")}>
-              <MenuItem value="All">All categories</MenuItem>
-              {categories.map((category) => <MenuItem key={category} value={category}>{category}</MenuItem>)}
+            <TextField
+              select
+              label="Category"
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value as EmergencyCategory | "All")}
+              slotProps={{ htmlInput: { "aria-label": "Filter incidents by emergency category" } }}
+              sx={{ display: { xs: "flex", md: "none" } }}
+            >
+              <MenuItem value="All">All Categories</MenuItem>
+              <MenuItem value="Medical Emergency">Medical Emergency</MenuItem>
+              <MenuItem value="Security/Public Safety">Security / Public Safety</MenuItem>
+              <MenuItem value="Fire/Disaster Emergency">Fire / Disaster Emergency</MenuItem>
             </TextField>
             <TextField select label="Status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as IncidentStatus | "All")}>
               <MenuItem value="All">All statuses</MenuItem>
               {incidentStatusOrder.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
             </TextField>
-            <TextField select label="Priority" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as IncidentPriority | "All")}>
-              <MenuItem value="All">All priorities</MenuItem>
-              {priorityOrder.map((priority) => <MenuItem key={priority} value={priority}>{priority}</MenuItem>)}
+            <TextField select label="Alert level" value={alertLevelFilter} onChange={(event) => setAlertLevelFilter(event.target.value as AlertLevel | "All")}>
+              <MenuItem value="All">All alert levels</MenuItem>
+              {alertLevelOrder.map((alertLevel) => <MenuItem key={alertLevel} value={alertLevel}>{alertLevel}</MenuItem>)}
             </TextField>
             <TextField select label="Location" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
               <MenuItem value="All">All locations</MenuItem>
@@ -316,7 +325,7 @@ export function IncidentTable({
               <MenuItem value="Unassigned">Unassigned</MenuItem>
               {teams.map((team) => <MenuItem key={team} value={team}>{team}</MenuItem>)}
             </TextField>
-            <Tooltip title="Reset filters and restore operational queue order">
+              <Tooltip title="Reset filters and restore highest-alert-level-first order">
               <Button variant="outlined" startIcon={<FilterAltOffOutlinedIcon />} onClick={clearFilters}>
                 Clear
               </Button>
@@ -338,7 +347,7 @@ export function IncidentTable({
                 </Stack>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{incident.deviceId}</Typography>
               </Box>
-              <PriorityChip priority={incident.priority} />
+              <AlertLevelChip alertLevel={incident.alertLevel} />
             </Stack>
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", mt: 1 }}>
               <StatusChip status={incident.status} />
@@ -361,21 +370,49 @@ export function IncidentTable({
       <Table sx={{ display: { xs: "none", md: "table" }, minWidth: 1100 }} aria-label="Live incident queue">
         <TableHead>
           <TableRow>
-            {([
-              ["Incident", "incident"],
-              ["Priority", "priority"],
-              ["Category", "category"],
-              ["Location", "location"],
-              ["Reported", "timestamp"],
-              ["Assigned Team", "assignedResponder"],
-              ["Status", "status"],
-            ] as const).map(([label, key]) => (
-              <TableCell key={key}>
-                <TableSortLabel active={sortKey === key} direction={sortKey === key ? sortDirection : "asc"} onClick={() => handleSort(key)}>
-                  {label}
-                </TableSortLabel>
-              </TableCell>
-            ))}
+            <TableCell>
+              <TableSortLabel active={sortKey === "incident"} direction={sortKey === "incident" ? sortDirection : "asc"} onClick={() => handleSort("incident")}>
+                Incident
+              </TableSortLabel>
+            </TableCell>
+            <TableCell>
+              <TableSortLabel
+                active={sortKey === "alertLevel"}
+                direction={sortKey === "alertLevel" ? sortDirection : "desc"}
+                onClick={() => handleSort("alertLevel")}
+                aria-label="Sort by alert level"
+              >
+                Alert Level
+              </TableSortLabel>
+            </TableCell>
+            <TableCell sx={{ minWidth: 190 }}>
+              <FormControl fullWidth size="small" variant="standard">
+                <Select
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value as EmergencyCategory | "All")}
+                  aria-label="Filter incidents by emergency category"
+                  disableUnderline
+                  sx={{ fontWeight: 800, fontSize: "0.875rem" }}
+                >
+                  <MenuItem value="All">All Categories</MenuItem>
+                  <MenuItem value="Medical Emergency">Medical Emergency</MenuItem>
+                  <MenuItem value="Security/Public Safety">Security / Public Safety</MenuItem>
+                  <MenuItem value="Fire/Disaster Emergency">Fire / Disaster Emergency</MenuItem>
+                </Select>
+              </FormControl>
+            </TableCell>
+            <TableCell>Location</TableCell>
+            <TableCell>
+              <TableSortLabel active={sortKey === "timestamp"} direction={sortKey === "timestamp" ? sortDirection : "asc"} onClick={() => handleSort("timestamp")}>
+                Reported
+              </TableSortLabel>
+            </TableCell>
+            <TableCell>Assigned Team</TableCell>
+            <TableCell>
+              <TableSortLabel active={sortKey === "status"} direction={sortKey === "status" ? sortDirection : "asc"} onClick={() => handleSort("status")}>
+                Status
+              </TableSortLabel>
+            </TableCell>
             <TableCell align="right" sx={{ position: "sticky", right: 0, zIndex: 3, bgcolor: "#F8FAFC", boxShadow: "-6px 0 10px rgba(11,31,51,0.05)" }}>Actions</TableCell>
           </TableRow>
         </TableHead>
@@ -393,7 +430,7 @@ export function IncidentTable({
                   )}
                 </Stack>
               </TableCell>
-              <TableCell><PriorityChip priority={incident.priority} /></TableCell>
+              <TableCell><AlertLevelChip alertLevel={incident.alertLevel} /></TableCell>
               <TableCell>{incident.category}</TableCell>
               <TableCell sx={{ minWidth: 180 }}>{incident.location}</TableCell>
               <TableCell sx={{ minWidth: 170 }}>{reportedContent(incident)}</TableCell>

@@ -8,7 +8,8 @@ import PinDropOutlinedIcon from "@mui/icons-material/PinDropOutlined";
 import ReportOffOutlinedIcon from "@mui/icons-material/ReportOffOutlined";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 import { mdrrmoPalette } from "@/theme/theme";
-import type { Incident, IncidentPriority, IncidentStatus } from "@/types";
+import type { Incident, IncidentStatus } from "@/types";
+import { sortIncidentsByAlertLevel } from "@/config/alertLevels";
 
 type StatusConfiguration = {
   label: IncidentStatus;
@@ -16,13 +17,6 @@ type StatusConfiguration = {
   color: string;
   background: string;
   icon: SvgIconComponent;
-};
-
-type PriorityConfiguration = {
-  label: IncidentPriority;
-  order: number;
-  color: string;
-  background: string;
 };
 
 export const incidentStatusOrder: IncidentStatus[] = [
@@ -95,40 +89,6 @@ export const incidentStatusConfig = {
   },
 } satisfies Record<IncidentStatus, StatusConfiguration>;
 
-export const priorityOrder: IncidentPriority[] = [
-  "Critical",
-  "High",
-  "Moderate",
-  "Low",
-];
-
-export const incidentPriorityConfig = {
-  Critical: {
-    label: "Critical",
-    order: 0,
-    color: mdrrmoPalette.alertRed,
-    background: mdrrmoPalette.goRedSoft,
-  },
-  High: {
-    label: "High",
-    order: 1,
-    color: "#7A5200",
-    background: "#FFF4D6",
-  },
-  Moderate: {
-    label: "Moderate",
-    order: 2,
-    color: mdrrmoPalette.setBlueDark,
-    background: mdrrmoPalette.setBlueSoft,
-  },
-  Low: {
-    label: "Low",
-    order: 3,
-    color: "#455A64",
-    background: "#ECEFF1",
-  },
-} satisfies Record<IncidentPriority, PriorityConfiguration>;
-
 export const finalIncidentStatuses: IncidentStatus[] = [
   "Resolved",
   "Closed",
@@ -146,12 +106,7 @@ export function isFinalIncident(status: IncidentStatus) {
 }
 
 export function sortIncidentQueue(incidents: Incident[]) {
-  return incidents.toSorted((a, b) => {
-    const orderDifference =
-      incidentStatusConfig[a.status].order - incidentStatusConfig[b.status].order;
-    if (orderDifference !== 0) return orderDifference;
-    return parseNodeGuardDate(a.timestamp).getTime() - parseNodeGuardDate(b.timestamp).getTime();
-  });
+  return sortIncidentsByAlertLevel(incidents);
 }
 
 export function parseNodeGuardDate(value: string) {
@@ -224,7 +179,6 @@ export type IncidentAction =
   | "remove-assignment"
   | "start-response"
   | "mark-on-scene"
-  | "resolve"
   | "close";
 
 export function getValidIncidentActions(incident: Incident): IncidentAction[] {
@@ -236,9 +190,9 @@ export function getValidIncidentActions(incident: Incident): IncidentAction[] {
     case "Dispatched":
       return ["reassign", "remove-assignment", "start-response", "mark-on-scene"];
     case "Responding":
-      return ["reassign", "remove-assignment", "mark-on-scene", "resolve"];
+      return ["reassign", "remove-assignment", "mark-on-scene"];
     case "On Scene":
-      return ["reassign", "remove-assignment", "resolve"];
+      return ["reassign", "remove-assignment"];
     case "Resolved":
       return ["close"];
     case "Closed":

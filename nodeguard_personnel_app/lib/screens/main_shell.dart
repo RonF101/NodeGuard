@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../data/mock_incidents.dart';
 import '../data/mock_responder.dart';
 import '../models/incident.dart';
+import '../models/backup_request.dart';
 import '../models/responder.dart';
 import '../services/nodeguard_repository.dart';
 import '../services/local_sync_queue.dart';
@@ -13,7 +14,7 @@ import '../services/operational_mode_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_layout.dart';
-import 'active_alerts_screen.dart';
+import 'backup_requests_screen.dart';
 import 'history_screen.dart';
 import 'home_screen.dart';
 import 'incident_details_screen.dart';
@@ -50,6 +51,8 @@ class _MainShellState extends State<MainShell> {
   RealtimeChannel? _incidentChannel;
   RealtimeChannel? _responderChannel;
   RealtimeChannel? _deviceChannel;
+  RealtimeChannel? _coordinationChannel;
+  int _unreadBackupCount = 0;
   bool _isFlushingQueue = false;
 
   @override
@@ -84,13 +87,20 @@ class _MainShellState extends State<MainShell> {
       return;
     }
     final remaining = <PendingStatusUpdate>[];
+    var rejected = 0;
+    String? rejectionReason;
     for (final update in pending) {
-      final saved = await _repository.submitIncidentStatusUpdate(
+      final result = await _repository.submitIncidentStatusUpdate(
         publicId: update.publicId,
         status: update.status,
         remarks: update.remarks,
       );
-      if (!saved) remaining.add(update);
+      if (result.shouldRetry) {
+        remaining.add(update);
+      } else if (!result.saved) {
+        rejected += 1;
+        rejectionReason ??= result.message;
+      }
     }
     await _localSyncQueue.save(remaining);
     _operationalMode.setPendingCount(remaining.length);
@@ -105,6 +115,17 @@ class _MainShellState extends State<MainShell> {
       );
       unawaited(_loadSharedData());
     }
+    if (rejected > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$rejected outdated queued update${rejected == 1 ? '' : 's'} removed. '
+            '${rejectionReason ?? 'The incident changed before the retry could be applied.'}',
+          ),
+        ),
+      );
+      unawaited(_loadSharedData());
+    }
   }
 
   Future<void> _loadSharedData() async {
@@ -114,6 +135,8 @@ class _MainShellState extends State<MainShell> {
         assignedResponderName: responder.name,
       );
       final allIncidents = await _repository.fetchIncidents();
+      final unreadBackupCount =
+          await _repository.fetchUnreadBackupNotificationCount();
       if (!mounted) return;
       final previousAssignment = _responder.currentAssignment;
       setState(() {
@@ -123,7 +146,9 @@ class _MainShellState extends State<MainShell> {
         _isBackendConfigured = _repository.isConfigured;
         _isLoading = false;
         _loadError = null;
+        _unreadBackupCount = unreadBackupCount;
       });
+      _operationalMode.markSynced();
       if (_hasLoadedSharedData &&
           responder.currentAssignment != previousAssignment &&
           responder.currentAssignment != 'No active assignment' &&
@@ -206,6 +231,7 @@ class _MainShellState extends State<MainShell> {
           incidentId: incident!.id,
           incidents: _assignedIncidents,
           onIncidentStatusChanged: _updateIncident,
+          onIncidentResolved: () => setState(() => _selectedIndex = 3),
         ),
       ),
     );
@@ -242,6 +268,41 @@ class _MainShellState extends State<MainShell> {
           callback: (_) => unawaited(_loadSharedData()),
         )
         .subscribe();
+    _coordinationChannel = client
+        .channel('nodeguard-personnel-coordination')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'incident_priority_updates',
+          callback: (_) => unawaited(_loadSharedData()),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'backup_requests',
+          callback: (_) => unawaited(_loadSharedData()),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'backup_offers',
+          callback: (_) => unawaited(_loadSharedData()),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'notifications',
+          callback: (_) => unawaited(_loadSharedData()),
+        )
+        .subscribe();
+  }
+
+  void _selectDestination(int index) {
+    setState(() => _selectedIndex = index);
+    if (index == 2 && _unreadBackupCount > 0) {
+      setState(() => _unreadBackupCount = 0);
+      unawaited(_repository.markBackupNotificationsRead());
+    }
   }
 
   Future<bool> _updateIncident(
@@ -249,16 +310,28 @@ class _MainShellState extends State<MainShell> {
     if (!_operationalMode.online && _repository.isConfigured) {
       return _queueIncidentUpdate(id, status, remarks);
     }
-    final updated = await _repository.submitIncidentStatusUpdate(
+    final result = await _repository.submitIncidentStatusUpdate(
         publicId: id, status: status, remarks: remarks);
-    if (!updated) {
-      if (_repository.isConfigured) {
-        return _queueIncidentUpdate(id, status, remarks);
+    if (result.shouldRetry && _repository.isConfigured) {
+      return _queueIncidentUpdate(id, status, remarks);
+    }
+    if (!result.saved) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result.message ??
+                  'This status update is no longer valid for the incident.',
+            ),
+          ),
+        );
+        unawaited(_loadSharedData());
       }
       return false;
     }
     if (!mounted) return false;
     _applyLocalIncidentUpdate(id, status, remarks);
+    unawaited(_loadSharedData());
     return true;
   }
 
@@ -296,6 +369,11 @@ class _MainShellState extends State<MainShell> {
       _responder = _responder.copyWith(
           currentAssignment:
               active.isEmpty ? 'No active assignment' : active.first.id);
+      if (status == IncidentStatus.resolved ||
+          status == IncidentStatus.closed ||
+          status == IncidentStatus.falseAlert) {
+        _selectedIndex = 3;
+      }
     });
   }
 
@@ -356,6 +434,9 @@ class _MainShellState extends State<MainShell> {
       if (_deviceChannel != null) {
         unawaited(client.removeChannel(_deviceChannel!));
       }
+      if (_coordinationChannel != null) {
+        unawaited(client.removeChannel(_coordinationChannel!));
+      }
     }
     super.dispose();
   }
@@ -366,17 +447,23 @@ class _MainShellState extends State<MainShell> {
       HomeScreen(
         incidents: _assignedIncidents,
         responder: _responder,
+        activeBackupRequests: _allIncidents
+            .where(
+                (incident) => incident.backupRequest?.status.isActive ?? false)
+            .length,
         onIncidentStatusChanged: _updateIncident,
+        onAvailabilityChanged: _updateAvailability,
+        onIncidentResolved: () => setState(() => _selectedIndex = 3),
       ),
       MapScreen(
         incidents:
             _allIncidents.where((incident) => !incident.isCompleted).toList(),
         onIncidentStatusChanged: _updateIncident,
       ),
-      ActiveAlertsScreen(
-        alerts:
-            _allIncidents.where((incident) => !incident.isCompleted).toList(),
-        onIncidentStatusChanged: _updateIncident,
+      BackupRequestsScreen(
+        incidents: _allIncidents,
+        responder: _responder,
+        onAvailabilityChanged: _updateAvailability,
       ),
       HistoryScreen(incidents: _allIncidents),
       ProfileScreen(
@@ -438,30 +525,35 @@ class _MainShellState extends State<MainShell> {
                         extended: extendedRail,
                         scrollable: true,
                         selectedIndex: _selectedIndex,
-                        onDestinationSelected: (index) =>
-                            setState(() => _selectedIndex = index),
+                        onDestinationSelected: _selectDestination,
                         labelType: extendedRail
                             ? NavigationRailLabelType.none
                             : NavigationRailLabelType.selected,
                         indicatorColor: AppColors.setBlueSoft,
-                        destinations: const [
-                          NavigationRailDestination(
+                        destinations: [
+                          const NavigationRailDestination(
                               icon: Icon(Icons.assignment_outlined),
                               selectedIcon: Icon(Icons.assignment),
                               label: Text('Home')),
-                          NavigationRailDestination(
+                          const NavigationRailDestination(
                               icon: Icon(Icons.map_outlined),
                               selectedIcon: Icon(Icons.map),
                               label: Text('Map')),
                           NavigationRailDestination(
-                              icon: Icon(Icons.notifications_outlined),
-                              selectedIcon: Icon(Icons.notifications),
-                              label: Text('Alerts')),
-                          NavigationRailDestination(
+                              icon: _BackupBadge(
+                                count: _unreadBackupCount,
+                                child: const Icon(Icons.group_add_outlined),
+                              ),
+                              selectedIcon: _BackupBadge(
+                                count: _unreadBackupCount,
+                                child: const Icon(Icons.group_add),
+                              ),
+                              label: const Text('Backup')),
+                          const NavigationRailDestination(
                               icon: Icon(Icons.history_outlined),
                               selectedIcon: Icon(Icons.history),
                               label: Text('History')),
-                          NavigationRailDestination(
+                          const NavigationRailDestination(
                               icon: Icon(Icons.person_outline),
                               selectedIcon: Icon(Icons.person),
                               label: Text('Profile')),
@@ -494,30 +586,35 @@ class _MainShellState extends State<MainShell> {
               ? null
               : NavigationBar(
                   selectedIndex: _selectedIndex,
-                  onDestinationSelected: (index) =>
-                      setState(() => _selectedIndex = index),
+                  onDestinationSelected: _selectDestination,
                   indicatorColor: AppColors.setBlueSoft,
                   labelBehavior: compactNavigation
                       ? NavigationDestinationLabelBehavior.onlyShowSelected
                       : NavigationDestinationLabelBehavior.alwaysShow,
-                  destinations: const [
-                    NavigationDestination(
+                  destinations: [
+                    const NavigationDestination(
                         icon: Icon(Icons.assignment_outlined),
                         selectedIcon: Icon(Icons.assignment),
                         label: 'Home'),
-                    NavigationDestination(
+                    const NavigationDestination(
                         icon: Icon(Icons.map_outlined),
                         selectedIcon: Icon(Icons.map),
                         label: 'Map'),
                     NavigationDestination(
-                        icon: Icon(Icons.notifications_outlined),
-                        selectedIcon: Icon(Icons.notifications),
-                        label: 'Alerts'),
-                    NavigationDestination(
+                        icon: _BackupBadge(
+                          count: _unreadBackupCount,
+                          child: const Icon(Icons.group_add_outlined),
+                        ),
+                        selectedIcon: _BackupBadge(
+                          count: _unreadBackupCount,
+                          child: const Icon(Icons.group_add),
+                        ),
+                        label: 'Backup'),
+                    const NavigationDestination(
                         icon: Icon(Icons.history_outlined),
                         selectedIcon: Icon(Icons.history),
                         label: 'History'),
-                    NavigationDestination(
+                    const NavigationDestination(
                         icon: Icon(Icons.person_outline),
                         selectedIcon: Icon(Icons.person),
                         label: 'Profile'),
@@ -525,6 +622,25 @@ class _MainShellState extends State<MainShell> {
                 ),
         );
       },
+    );
+  }
+}
+
+class _BackupBadge extends StatelessWidget {
+  const _BackupBadge({required this.count, required this.child});
+
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count <= 0) return child;
+    return Semantics(
+      label: '$count unread active backup request${count == 1 ? '' : 's'}',
+      child: Badge(
+        label: Text(count > 99 ? '99+' : '$count'),
+        child: child,
+      ),
     );
   }
 }

@@ -14,21 +14,31 @@ class ConnectivityBanner extends StatelessWidget {
       builder: (context, _) {
         final offline = service.mode == OperationalMode.offline;
         final low = service.mode == OperationalMode.lowBandwidth;
+        final hasPendingUpdates = service.pendingCount > 0;
         final label = offline
             ? 'Offline · Local Sync'
             : low
                 ? 'Low-Bandwidth Mode'
-                : 'Online · Synced';
+                : hasPendingUpdates
+                    ? 'Online · Updates Pending'
+                    : 'Online · Synced';
         final helper = offline
             ? 'Status forms save locally; device commands wait for network.'
             : low
                 ? 'Remote audio and external maps are deferred.'
-                : 'Live operational data is available.';
+                : hasPendingUpdates
+                    ? '${service.pendingCount} field update${service.pendingCount == 1 ? '' : 's'} waiting for confirmation.'
+                    : 'Live operational data is available.';
+        final syncedAt = service.lastSyncedAt;
+        final syncedLabel = syncedAt == null
+            ? 'Waiting for first synchronization.'
+            : 'Last synced ${_formatSyncTime(syncedAt)}.';
+        final connectionHelper = '$syncedLabel $helper';
         return SafeArea(
           bottom: false,
           child: Semantics(
             liveRegion: true,
-            label: '$label. $helper',
+            label: '$label. $connectionHelper',
             child: Container(
               width: double.infinity,
               constraints: const BoxConstraints(minHeight: 56),
@@ -68,7 +78,7 @@ class ConnectivityBanner extends StatelessWidget {
                             border: Border.all(color: AppColors.setBlue),
                           ),
                           child: Text(
-                            '${service.pendingCount} queued',
+                            '${service.pendingCount} pending',
                             style: const TextStyle(
                               color: AppColors.setBlueDark,
                               fontSize: 12,
@@ -95,7 +105,7 @@ class ConnectivityBanner extends StatelessWidget {
                             modeSwitch,
                           ],
                         ),
-                        Text(helper,
+                        Text(connectionHelper,
                             style: const TextStyle(
                                 color: AppColors.mutedText, fontSize: 12)),
                         if (queued != null) ...[
@@ -120,7 +130,7 @@ class ConnectivityBanner extends StatelessWidget {
                                     color: AppColors.navy,
                                     fontWeight: FontWeight.w900)),
                             Text(
-                              helper,
+                              connectionHelper,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -144,4 +154,12 @@ class ConnectivityBanner extends StatelessWidget {
       },
     );
   }
+}
+
+String _formatSyncTime(DateTime value) {
+  final local = value.toLocal();
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  final second = local.second.toString().padLeft(2, '0');
+  return '$hour:$minute:$second';
 }

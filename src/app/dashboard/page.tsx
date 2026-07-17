@@ -137,7 +137,7 @@ export default function DashboardPage() {
                 Live Incident Queue
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Actionable incidents are ordered by workflow stage, then oldest waiting time.
+                Incidents are ordered by alert level, then by newest reported time. Unassessed alerts stay first for prompt evaluation.
               </Typography>
             </Box>
           </Stack>

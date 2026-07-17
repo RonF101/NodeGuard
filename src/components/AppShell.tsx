@@ -15,7 +15,11 @@ import { ConnectivityProvider } from "@/components/connectivity/ConnectivityProv
 import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
 import { RealtimeRefresh } from "@/components/RealtimeRefresh";
 import { collapsedDrawerWidth, Sidebar, drawerWidth } from "@/components/Sidebar";
-import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabaseClient";
+import {
+  getSupabaseClient,
+  isNodeGuardDemoMode,
+  isSupabaseConfigured,
+} from "@/lib/supabaseClient";
 import { fetchDeviceNodes } from "@/lib/nodeguardRepository";
 import { deviceNodes as deviceSeed } from "@/data/devices";
 import type { DeviceNode } from "@/types";
@@ -44,6 +48,7 @@ function AppShellFrame({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { mode } = useConnectivity();
+  const publicDemo = isNodeGuardDemoMode();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [operator, setOperator] = useState<Operator | null>(
@@ -179,7 +184,8 @@ function AppShellFrame({ children }: { children: ReactNode }) {
         onMenuClick={() => setMobileOpen(true)}
         operatorName={operator.name}
         roleLabel={formatRole(operator.role)}
-        onLogout={logout}
+        onLogout={publicDemo ? undefined : logout}
+        publicDemo={publicDemo}
         systemHealthy={systemHealthy}
         lastSynced={lastSynced}
         nodeHealth={{ online: onlineNodes, total: nodes.length }}

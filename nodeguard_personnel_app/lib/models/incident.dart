@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import 'alert_level.dart';
+import 'backup_request.dart';
 
 enum IncidentCategory { medical, security, fireDisaster }
-
-enum IncidentPriority { critical, high, medium, low }
 
 enum IncidentStatus {
   newAlert,
@@ -38,34 +38,6 @@ extension IncidentCategoryLabel on IncidentCategory {
         return Icons.shield_outlined;
       case IncidentCategory.fireDisaster:
         return Icons.local_fire_department_outlined;
-    }
-  }
-}
-
-extension IncidentPriorityLabel on IncidentPriority {
-  String get label {
-    switch (this) {
-      case IncidentPriority.critical:
-        return 'Critical';
-      case IncidentPriority.high:
-        return 'High';
-      case IncidentPriority.medium:
-        return 'Medium';
-      case IncidentPriority.low:
-        return 'Low';
-    }
-  }
-
-  Color get color {
-    switch (this) {
-      case IncidentPriority.critical:
-        return AppColors.alertRed;
-      case IncidentPriority.high:
-        return AppColors.setBlueDark;
-      case IncidentPriority.medium:
-        return AppColors.setBlue;
-      case IncidentPriority.low:
-        return AppColors.mutedText;
     }
   }
 }
@@ -127,7 +99,7 @@ class Incident {
     required this.deviceId,
     required this.nodeLocation,
     required this.timestamp,
-    required this.priority,
+    required this.alertLevel,
     required this.status,
     required this.voiceContextAvailable,
     required this.voiceDuration,
@@ -138,6 +110,13 @@ class Incident {
     required this.notes,
     required this.buzzerActive,
     required this.buzzerUpdatedAt,
+    this.alertLevelUpdatedAt,
+    this.alertLevelUpdatedBy,
+    this.alertLevelUpdateSource,
+    this.alertLevelUpdateReason,
+    this.assignedResponders = const [],
+    this.activityHistory = const [],
+    this.backupRequest,
     this.voiceUrl,
     this.voiceTranscript,
   });
@@ -149,12 +128,17 @@ class Incident {
   final String deviceId;
   final String nodeLocation;
   final DateTime timestamp;
-  final IncidentPriority priority;
+  final IncidentAlertLevel alertLevel;
+  final DateTime? alertLevelUpdatedAt;
+  final String? alertLevelUpdatedBy;
+  final String? alertLevelUpdateSource;
+  final String? alertLevelUpdateReason;
   final IncidentStatus status;
   final bool voiceContextAvailable;
   final String voiceDuration;
   final String assignedUnit;
   final String assignedResponder;
+  final List<String> assignedResponders;
   final String description;
   final String coordinates;
   final List<String> notes;
@@ -162,6 +146,8 @@ class Incident {
   final DateTime? buzzerUpdatedAt;
   final String? voiceUrl;
   final String? voiceTranscript;
+  final List<String> activityHistory;
+  final BackupRequest? backupRequest;
 
   bool get isCompleted =>
       status == IncidentStatus.resolved ||
@@ -173,6 +159,14 @@ class Incident {
     List<String>? notes,
     bool? buzzerActive,
     DateTime? buzzerUpdatedAt,
+    IncidentAlertLevel? alertLevel,
+    DateTime? alertLevelUpdatedAt,
+    String? alertLevelUpdatedBy,
+    String? alertLevelUpdateSource,
+    String? alertLevelUpdateReason,
+    List<String>? assignedResponders,
+    List<String>? activityHistory,
+    BackupRequest? backupRequest,
   }) {
     return Incident(
       id: id,
@@ -182,12 +176,19 @@ class Incident {
       deviceId: deviceId,
       nodeLocation: nodeLocation,
       timestamp: timestamp,
-      priority: priority,
+      alertLevel: alertLevel ?? this.alertLevel,
+      alertLevelUpdatedAt: alertLevelUpdatedAt ?? this.alertLevelUpdatedAt,
+      alertLevelUpdatedBy: alertLevelUpdatedBy ?? this.alertLevelUpdatedBy,
+      alertLevelUpdateSource:
+          alertLevelUpdateSource ?? this.alertLevelUpdateSource,
+      alertLevelUpdateReason:
+          alertLevelUpdateReason ?? this.alertLevelUpdateReason,
       status: status ?? this.status,
       voiceContextAvailable: voiceContextAvailable,
       voiceDuration: voiceDuration,
       assignedUnit: assignedUnit,
       assignedResponder: assignedResponder,
+      assignedResponders: assignedResponders ?? this.assignedResponders,
       description: description,
       coordinates: coordinates,
       notes: notes ?? this.notes,
@@ -195,6 +196,8 @@ class Incident {
       buzzerUpdatedAt: buzzerUpdatedAt ?? this.buzzerUpdatedAt,
       voiceUrl: voiceUrl,
       voiceTranscript: voiceTranscript,
+      activityHistory: activityHistory ?? this.activityHistory,
+      backupRequest: backupRequest ?? this.backupRequest,
     );
   }
 }
@@ -204,3 +207,31 @@ typedef IncidentStatusUpdateCallback = Future<bool> Function(
   IncidentStatus status,
   String remarks,
 );
+
+List<Incident> sortIncidentsByAlertLevel(
+  Iterable<Incident> incidents, {
+  bool reverse = false,
+}) {
+  final sorted = List<Incident>.of(incidents);
+  sorted.sort((first, second) {
+    final level = compareAlertLevels(first.alertLevel, second.alertLevel);
+    if (level != 0) return reverse ? -level : level;
+    final reported = second.timestamp.compareTo(first.timestamp);
+    return reported != 0 ? reported : first.id.compareTo(second.id);
+  });
+  return sorted;
+}
+
+List<Incident> sortBackupRequestIncidents(Iterable<Incident> incidents) {
+  final sorted = List<Incident>.of(incidents);
+  sorted.sort((first, second) {
+    final level = compareAlertLevels(first.alertLevel, second.alertLevel);
+    if (level != 0) return level;
+    final firstRequested = first.backupRequest?.requestedAt ?? first.timestamp;
+    final secondRequested =
+        second.backupRequest?.requestedAt ?? second.timestamp;
+    final waiting = firstRequested.compareTo(secondRequested);
+    return waiting != 0 ? waiting : first.id.compareTo(second.id);
+  });
+  return sorted;
+}
