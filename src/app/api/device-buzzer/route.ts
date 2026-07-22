@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { setDeviceBuzzer } from "@/lib/nodeguardRepository";
-import { AuthorizationError, requireRequestActor } from "@/lib/auth";
+import { AuthorizationError, requireDevicePermission, requireRequestActor } from "@/lib/auth";
 
 export async function POST(request: Request) {
   try {
     const actor = await requireRequestActor(request, [
-      "personnel",
+      "barangay_admin",
+      "barangay_personnel",
+      "mdrrmo_admin",
+      "mdrrmo_operations",
       "admin",
       "super_admin",
     ]);
@@ -20,12 +23,14 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    await requireDevicePermission(actor, body.deviceId);
 
     const result = await setDeviceBuzzer(
       body.deviceId,
       body.active,
       "dashboard",
-      actor.demo ? undefined : actor.id,
+      actor.id,
+      actor.name,
     );
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   } catch (error) {

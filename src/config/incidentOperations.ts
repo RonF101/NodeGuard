@@ -8,7 +8,7 @@ import PinDropOutlinedIcon from "@mui/icons-material/PinDropOutlined";
 import ReportOffOutlinedIcon from "@mui/icons-material/ReportOffOutlined";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 import { mdrrmoPalette } from "@/theme/theme";
-import type { Incident, IncidentStatus } from "@/types";
+import type { Incident, IncidentStatus, ValidationResult } from "@/types";
 import { sortIncidentsByAlertLevel } from "@/config/alertLevels";
 
 type StatusConfiguration = {
@@ -20,17 +20,63 @@ type StatusConfiguration = {
 };
 
 export const incidentStatusOrder: IncidentStatus[] = [
-  "Pending Verification",
-  "Verified",
+  "Reported",
+  "Pending Validation",
+  "Validated",
+  "Assigned",
   "Dispatched",
   "Responding",
   "On Scene",
   "Resolved",
   "Closed",
-  "False Alert",
+  "Cancelled",
 ];
 
+export const validationResultOrder: ValidationResult[] = [
+  "Validated",
+  "Unverified",
+  "Duplicate Report",
+  "Non-Emergency",
+  "Accidental Activation",
+  "False or Misleading Report",
+  "Fraudulent, Hoax, or Prank Report",
+];
+
+export function getValidationResultLabel(result: ValidationResult) {
+  if (result === "Validated") return "Validated Incident";
+  if (result === "Unverified") return "Unverified Report";
+  return result;
+}
+
 export const incidentStatusConfig = {
+  Reported: {
+    label: "Reported",
+    order: 0,
+    color: "#5C4B00",
+    background: "#FFF8D9",
+    icon: FactCheckOutlinedIcon,
+  },
+  "Pending Validation": {
+    label: "Pending Validation",
+    order: 1,
+    color: "#7A5200",
+    background: "#FFF4D6",
+    icon: FactCheckOutlinedIcon,
+  },
+  Validated: {
+    label: "Validated",
+    order: 2,
+    color: mdrrmoPalette.setBlueDark,
+    background: mdrrmoPalette.setBlueSoft,
+    icon: GppGoodOutlinedIcon,
+  },
+  Assigned: {
+    label: "Assigned",
+    order: 3,
+    color: mdrrmoPalette.setBlue,
+    background: mdrrmoPalette.setBlueSoft,
+    icon: SendOutlinedIcon,
+  },
   "Pending Verification": {
     label: "Pending Verification",
     order: 0,
@@ -52,51 +98,92 @@ export const incidentStatusConfig = {
     background: mdrrmoPalette.setBlueSoft,
     icon: SendOutlinedIcon,
   },
+  Escalated: {
+    label: "Escalated",
+    order: 3,
+    color: "#8A4B08",
+    background: "#FFF0D9",
+    icon: CrisisAlertIcon,
+  },
+  "Coordinated by LT-MDRRMO": {
+    label: "Coordinated by LT-MDRRMO",
+    order: 4,
+    color: mdrrmoPalette.setBlueDark,
+    background: mdrrmoPalette.setBlueSoft,
+    icon: SendOutlinedIcon,
+  },
+  "Unable to Respond": {
+    label: "Unable to Respond",
+    order: 5,
+    color: "#8B1E1E",
+    background: "#FDE8E7",
+    icon: ReportOffOutlinedIcon,
+  },
   Responding: {
     label: "Responding",
-    order: 3,
+    order: 6,
     color: mdrrmoPalette.setBlueDark,
     background: "#DDEBFF",
     icon: CrisisAlertIcon,
   },
   "On Scene": {
     label: "On Scene",
-    order: 4,
+    order: 7,
     color: mdrrmoPalette.setBlueDark,
     background: "#DDEBFF",
     icon: PinDropOutlinedIcon,
   },
   Resolved: {
     label: "Resolved",
-    order: 5,
+    order: 8,
     color: mdrrmoPalette.successGreen,
     background: "#E7F4E8",
     icon: TaskAltOutlinedIcon,
   },
   Closed: {
     label: "Closed",
-    order: 6,
+    order: 9,
     color: "#455A64",
     background: "#ECEFF1",
     icon: LockOutlinedIcon,
   },
+  Cancelled: {
+    label: "Cancelled",
+    order: 10,
+    color: "#455A64",
+    background: "#ECEFF1",
+    icon: ReportOffOutlinedIcon,
+  },
   "False Alert": {
     label: "False Alert",
-    order: 7,
+    order: 10,
     color: "#455A64",
     background: "#ECEFF1",
     icon: ReportOffOutlinedIcon,
   },
 } satisfies Record<IncidentStatus, StatusConfiguration>;
 
+export function getIncidentStatusLabel(status: IncidentStatus) {
+  if (status === "Pending Verification") return "Pending Validation";
+  if (status === "Validated" || status === "Verified" || status === "Unable to Respond") return "Awaiting Assignment";
+  if (status === "Escalated" || status === "Coordinated by LT-MDRRMO") return "Responding";
+  if (status === "False Alert") return "Closed";
+  return status;
+}
+
 export const finalIncidentStatuses: IncidentStatus[] = [
   "Resolved",
   "Closed",
+  "Cancelled",
   "False Alert",
 ];
 
 export const activeResponseStatuses: IncidentStatus[] = [
+  "Assigned",
   "Dispatched",
+  "Escalated",
+  "Coordinated by LT-MDRRMO",
+  "Unable to Respond",
   "Responding",
   "On Scene",
 ];
@@ -159,11 +246,11 @@ export function getElapsedWaitingTime(incident: Incident, now = Date.now()) {
 export function getOperationalMetrics(incidents: Incident[]) {
   return {
     pendingVerification: incidents.filter(
-      (incident) => incident.status === "Pending Verification",
+      (incident) => ["Reported", "Pending Validation", "Pending Verification"].includes(incident.status),
     ).length,
     awaitingDispatch: incidents.filter(
       (incident) =>
-        incident.status === "Verified" && incident.assignedResponder === "Unassigned",
+        ["Validated", "Verified"].includes(incident.status) && incident.assignedResponder === "Unassigned",
     ).length,
     activeResponses: incidents.filter((incident) =>
       activeResponseStatuses.includes(incident.status),
@@ -175,27 +262,43 @@ export type IncidentAction =
   | "verify"
   | "false-alert"
   | "dispatch"
+  | "confirm-dispatch"
   | "reassign"
   | "remove-assignment"
   | "start-response"
   | "mark-on-scene"
+  | "resolve"
+  | "escalate"
+  | "acknowledge-escalation"
   | "close";
 
 export function getValidIncidentActions(incident: Incident): IncidentAction[] {
   switch (incident.status) {
+    case "Reported":
+    case "Pending Validation":
     case "Pending Verification":
       return ["verify", "false-alert"];
+    case "Validated":
     case "Verified":
-      return ["dispatch", "false-alert"];
+      return ["dispatch", "false-alert", "escalate"];
+    case "Assigned":
+      return ["confirm-dispatch", "reassign", "remove-assignment", "escalate"];
     case "Dispatched":
-      return ["reassign", "remove-assignment", "start-response", "mark-on-scene"];
+      return ["reassign", "remove-assignment", "start-response", "mark-on-scene", "escalate"];
+    case "Escalated":
+      return ["acknowledge-escalation"];
+    case "Coordinated by LT-MDRRMO":
+      return ["reassign", "start-response", "mark-on-scene"];
+    case "Unable to Respond":
+      return ["dispatch", "reassign", "remove-assignment", "escalate"];
     case "Responding":
-      return ["reassign", "remove-assignment", "mark-on-scene"];
+      return ["reassign", "remove-assignment", "mark-on-scene", "resolve"];
     case "On Scene":
-      return ["reassign", "remove-assignment"];
+      return ["reassign", "remove-assignment", "resolve"];
     case "Resolved":
       return ["close"];
     case "Closed":
+    case "Cancelled":
     case "False Alert":
       return [];
   }

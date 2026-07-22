@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { AuthorizationError, requireRequestActor } from "@/lib/auth";
+import { AuthorizationError, requireBackupRequestPermission, requireRequestActor } from "@/lib/auth";
 import { cancelBackupRequest } from "@/lib/nodeguardRepository";
 
 export async function DELETE(request: Request) {
   try {
     const actor = await requireRequestActor(request, [
-      "personnel",
+      "barangay_admin",
+      "barangay_personnel",
+      "mdrrmo_admin",
+      "mdrrmo_operations",
       "admin",
       "super_admin",
     ]);
@@ -16,6 +19,7 @@ export async function DELETE(request: Request) {
         { status: 400 },
       );
     }
+    await requireBackupRequestPermission(actor, body.requestId);
     const result = await cancelBackupRequest(
       body.requestId,
       body.reason,

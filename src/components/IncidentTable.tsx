@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import FormControl from "@mui/material/FormControl";
@@ -14,20 +13,21 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
+import TablePagination from "@mui/material/TablePagination";
 import TableSortLabel from "@mui/material/TableSortLabel";
 import Select from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import FilterAltOffOutlinedIcon from "@mui/icons-material/FilterAltOffOutlined";
-import MarkUnreadChatAltOutlinedIcon from "@mui/icons-material/MarkUnreadChatAltOutlined";
-import OpenInNewOutlinedIcon from "@mui/icons-material/OpenInNewOutlined";
 import VolumeUpOutlinedIcon from "@mui/icons-material/VolumeUpOutlined";
 import {
   formatPhilippineDateTime,
   formatRelativeTime,
   incidentStatusConfig,
   incidentStatusOrder,
+  getIncidentStatusLabel,
+  getValidationResultLabel,
   parseNodeGuardDate,
 } from "@/config/incidentOperations";
 import {
@@ -37,11 +37,14 @@ import {
 } from "@/config/alertLevels";
 import { AlertLevelChip } from "@/components/AlertLevelChip";
 import { StatusChip } from "@/components/StatusChip";
+import { IncidentActionsMenu } from "@/components/IncidentActionsMenu";
 import type {
   EmergencyCategory,
   Incident,
   AlertLevel,
   IncidentStatus,
+  IncidentSourceType,
+  ReportingChannel,
 } from "@/types";
 
 type IncidentTableProps = {
@@ -50,6 +53,7 @@ type IncidentTableProps = {
   showVoice?: boolean;
   showFilters?: boolean;
   initialStatus?: IncidentStatus | "All";
+  initialSearch?: string;
 };
 
 type SortKey =
@@ -110,16 +114,26 @@ export function IncidentTable({
   showVoice = false,
   showFilters = true,
   initialStatus = "All",
+  initialSearch = "",
 }: IncidentTableProps) {
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
   const [categoryFilter, setCategoryFilter] = useState<EmergencyCategory | "All">("All");
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | "All">(initialStatus);
   const [alertLevelFilter, setAlertLevelFilter] = useState<AlertLevel | "All">("All");
   const [locationFilter, setLocationFilter] = useState("All");
   const [teamFilter, setTeamFilter] = useState("All");
+  const [barangayFilter, setBarangayFilter] = useState("All");
+  const [validationFilter, setValidationFilter] = useState("All");
+  const [escalationFilter, setEscalationFilter] = useState("All");
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<IncidentSourceType | "All">("All");
+  const [reportingChannelFilter, setReportingChannelFilter] = useState<ReportingChannel | "All">("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("alertLevel");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [relativeNow, setRelativeNow] = useState<number | null>(null);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   useEffect(() => {
     const start = window.setTimeout(() => setRelativeNow(Date.now()), 0);
@@ -154,6 +168,18 @@ export function IncidentTable({
         .toSorted(),
     [incidents],
   );
+  const barangays = useMemo(
+    () => Array.from(new Set(incidents.map((incident) => incident.barangayName).filter(Boolean) as string[])).toSorted(),
+    [incidents],
+  );
+  const validationResults = useMemo(
+    () => Array.from(new Set(incidents.map((incident) => incident.validationResult).filter(Boolean) as string[])).toSorted(),
+    [incidents],
+  );
+  const reportingChannels = useMemo(
+    () => Array.from(new Set(incidents.map((incident) => incident.reportingChannel).filter(Boolean) as ReportingChannel[])).toSorted(),
+    [incidents],
+  );
 
   const visibleIncidents = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -163,16 +189,31 @@ export function IncidentTable({
         incident.deviceId,
         incident.location,
         incident.assignedResponder,
+        incident.barangayName,
+        incident.validationResult,
+        incident.sourceType,
+        incident.reportingChannel,
+        incident.reportingPersonOrSource,
+        incident.reportingOffice,
+        incident.incidentSubtype,
+        incident.landmark,
       ]
         .join(" ")
         .toLowerCase();
       return (
         (!normalizedSearch || searchable.includes(normalizedSearch)) &&
         (categoryFilter === "All" || incident.category === categoryFilter) &&
-        (statusFilter === "All" || incident.status === statusFilter) &&
+        (statusFilter === "All" || getIncidentStatusLabel(incident.status) === getIncidentStatusLabel(statusFilter)) &&
         (alertLevelFilter === "All" || incident.alertLevel === alertLevelFilter) &&
         (locationFilter === "All" || incident.location === locationFilter) &&
-        (teamFilter === "All" || incident.assignedResponder === teamFilter)
+        (teamFilter === "All" || incident.assignedResponder === teamFilter) &&
+        (barangayFilter === "All" || incident.barangayName === barangayFilter) &&
+        (validationFilter === "All" || incident.validationResult === validationFilter) &&
+        (sourceTypeFilter === "All" || incident.sourceType === sourceTypeFilter) &&
+        (reportingChannelFilter === "All" || incident.reportingChannel === reportingChannelFilter) &&
+        (escalationFilter === "All" || (escalationFilter === "Escalated" ? incident.escalationStatus && incident.escalationStatus !== "Not Escalated" : !incident.escalationStatus || incident.escalationStatus === "Not Escalated")) &&
+        (!dateFrom || incident.timestamp.slice(0, 10) >= dateFrom) &&
+        (!dateTo || incident.timestamp.slice(0, 10) <= dateTo)
       );
     });
     if (sortKey === "alertLevel") {
@@ -186,15 +227,32 @@ export function IncidentTable({
     });
   }, [
     categoryFilter,
+    barangayFilter,
+    dateFrom,
+    dateTo,
+    escalationFilter,
     incidents,
     locationFilter,
     alertLevelFilter,
     search,
+    sourceTypeFilter,
+    reportingChannelFilter,
     sortDirection,
     sortKey,
     statusFilter,
     teamFilter,
+    validationFilter,
   ]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPage(0), 0);
+    return () => window.clearTimeout(timer);
+  }, [search, categoryFilter, statusFilter, alertLevelFilter, locationFilter, teamFilter, barangayFilter, validationFilter, escalationFilter, sourceTypeFilter, reportingChannelFilter, dateFrom, dateTo, incidents.length]);
+
+  const paginatedIncidents = useMemo(
+    () => visibleIncidents.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
+    [page, rowsPerPage, visibleIncidents],
+  );
 
   const handleSort = (nextKey: ColumnSortKey) => {
     if (sortKey === nextKey) {
@@ -206,12 +264,19 @@ export function IncidentTable({
   };
 
   const clearFilters = () => {
-    setSearch("");
+    setSearch(initialSearch);
     setCategoryFilter("All");
     setStatusFilter("All");
     setAlertLevelFilter("All");
     setLocationFilter("All");
     setTeamFilter("All");
+    setBarangayFilter("All");
+    setValidationFilter("All");
+    setEscalationFilter("All");
+    setSourceTypeFilter("All");
+    setReportingChannelFilter("All");
+    setDateFrom("");
+    setDateTo("");
     setSortKey("alertLevel");
     setSortDirection("desc");
   };
@@ -239,35 +304,11 @@ export function IncidentTable({
     );
   };
 
-  const updateButton = (incident: Incident, fullWidth = false) => {
+  const updateState = (incident: Incident) => {
     const count = incident.fieldNoteCount ?? 0;
-    if (!count) return null;
     const unread = !seenNoteKeys.has(noteKeyFor(incident));
     const urgent = unread && ["Critical", "High"].includes(incident.alertLevel);
-    const tooltip = `${count} field update${count === 1 ? "" : "s"}. ${unread ? "Unread" : "Previously opened"}${urgent ? " and urgent." : "."}`;
-    return (
-      <Tooltip title={tooltip} arrow>
-        <Button
-          fullWidth={fullWidth}
-          size="small"
-          variant="text"
-          color={urgent ? "error" : "inherit"}
-          startIcon={
-            <Badge
-              badgeContent={count}
-              color={urgent ? "error" : "default"}
-              invisible={!unread}
-            >
-              <MarkUnreadChatAltOutlinedIcon fontSize="small" />
-            </Badge>
-          }
-          onClick={() => handleViewUpdates(incident)}
-          aria-label={`Updates for ${incident.id}: ${tooltip}`}
-        >
-          Updates
-        </Button>
-      </Tooltip>
-    );
+    return { count, unread, urgent };
   };
 
   return (
@@ -289,7 +330,7 @@ export function IncidentTable({
           >
             <TextField
               label="Search incidents"
-              placeholder="Incident ID, node, location, or team"
+              placeholder="ID, reporter, channel, location, node, or team"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               fullWidth
@@ -310,11 +351,20 @@ export function IncidentTable({
             </TextField>
             <TextField select label="Status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as IncidentStatus | "All")}>
               <MenuItem value="All">All statuses</MenuItem>
-              {incidentStatusOrder.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
+              {incidentStatusOrder.map((status) => <MenuItem key={status} value={status}>{getIncidentStatusLabel(status)}</MenuItem>)}
             </TextField>
             <TextField select label="Alert level" value={alertLevelFilter} onChange={(event) => setAlertLevelFilter(event.target.value as AlertLevel | "All")}>
               <MenuItem value="All">All alert levels</MenuItem>
               {alertLevelOrder.map((alertLevel) => <MenuItem key={alertLevel} value={alertLevel}>{alertLevel}</MenuItem>)}
+            </TextField>
+            <TextField select label="Source type" value={sourceTypeFilter} onChange={(event) => setSourceTypeFilter(event.target.value as IncidentSourceType | "All")}>
+              <MenuItem value="All">All source types</MenuItem>
+              <MenuItem value="Manual Entry">Manual Entry</MenuItem>
+              <MenuItem value="IoT Node">IoT Node</MenuItem>
+            </TextField>
+            <TextField select label="Reporting channel" value={reportingChannelFilter} onChange={(event) => setReportingChannelFilter(event.target.value as ReportingChannel | "All")}>
+              <MenuItem value="All">All reporting channels</MenuItem>
+              {reportingChannels.map((channel) => <MenuItem key={channel} value={channel}>{channel}</MenuItem>)}
             </TextField>
             <TextField select label="Location" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
               <MenuItem value="All">All locations</MenuItem>
@@ -325,6 +375,21 @@ export function IncidentTable({
               <MenuItem value="Unassigned">Unassigned</MenuItem>
               {teams.map((team) => <MenuItem key={team} value={team}>{team}</MenuItem>)}
             </TextField>
+            {barangays.length > 0 && <TextField select label="Barangay" value={barangayFilter} onChange={(event) => setBarangayFilter(event.target.value)}>
+              <MenuItem value="All">All barangays</MenuItem>
+              {barangays.map((barangay) => <MenuItem key={barangay} value={barangay}>Barangay {barangay}</MenuItem>)}
+            </TextField>}
+            <TextField select label="Validation result" value={validationFilter} onChange={(event) => setValidationFilter(event.target.value)}>
+              <MenuItem value="All">All validation results</MenuItem>
+              {validationResults.map((result) => <MenuItem key={result} value={result}>{getValidationResultLabel(result as import("@/types").ValidationResult)}</MenuItem>)}
+            </TextField>
+            <TextField select label="Escalation" value={escalationFilter} onChange={(event) => setEscalationFilter(event.target.value)}>
+              <MenuItem value="All">All escalation states</MenuItem>
+              <MenuItem value="Escalated">Escalated</MenuItem>
+              <MenuItem value="Local">Locally handled</MenuItem>
+            </TextField>
+            <TextField type="date" label="Date from" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} />
+            <TextField type="date" label="Date to" value={dateTo} onChange={(event) => setDateTo(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} />
               <Tooltip title="Reset filters and restore highest-alert-level-first order">
               <Button variant="outlined" startIcon={<FilterAltOffOutlinedIcon />} onClick={clearFilters}>
                 Clear
@@ -335,17 +400,19 @@ export function IncidentTable({
       )}
 
       <Stack spacing={1.5} sx={{ display: { xs: "flex", md: "none" }, p: 1.5 }}>
-        {visibleIncidents.map((incident) => (
+        {paginatedIncidents.map((incident) => {
+          const updates = updateState(incident);
+          return (
           <Box component="article" key={incident.id} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 2, bgcolor: "background.paper" }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
               <Box sx={{ minWidth: 0 }}>
                 <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
                   <Typography variant="subtitle1" color="secondary" sx={{ fontWeight: 900 }}>{incident.id}</Typography>
-                  {showVoice && incident.voiceContext !== "No voice context" && (
+                  {showVoice && Boolean(incident.voiceContext && incident.voiceContext !== "No voice context") && (
                     <Tooltip title="Voice recording available"><VolumeUpOutlinedIcon color="primary" fontSize="small" /></Tooltip>
                   )}
                 </Stack>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{incident.deviceId}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{incident.sourceType} · {incident.reportingChannel ?? "Channel not recorded"}{incident.deviceId ? ` · ${incident.deviceId}` : ""}</Typography>
               </Box>
               <AlertLevelChip alertLevel={incident.alertLevel} />
             </Stack>
@@ -358,17 +425,18 @@ export function IncidentTable({
               <Box><Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Reported</Typography>{reportedContent(incident)}</Box>
               <Box sx={{ gridColumn: { sm: "1 / -1" } }}><Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Assigned Team</Typography><Typography variant="body2" sx={{ fontWeight: 700 }}>{incident.assignedResponder}</Typography></Box>
             </Box>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1.5 }}>
-              {updateButton(incident, true)}
-              <Button fullWidth variant="contained" startIcon={<OpenInNewOutlinedIcon />} onClick={() => onView?.(incident)}>Open</Button>
+            <Stack direction="row" spacing={1} sx={{ mt: 1.5, alignItems: "center", justifyContent: "space-between" }}>
+              <Button variant="contained" onClick={() => onView?.(incident)}>Open incident</Button>
+              <IncidentActionsMenu incidentId={incident.id} fieldNoteCount={updates.count} unreadUpdates={updates.unread} urgentUpdates={updates.urgent} onOpen={() => onView?.(incident)} onViewUpdates={() => handleViewUpdates(incident)} />
             </Stack>
           </Box>
-        ))}
+          );
+        })}
         {!visibleIncidents.length && <Typography color="text.secondary" sx={{ p: 3, textAlign: "center" }}>No incidents match the selected filters.</Typography>}
       </Stack>
 
       <Table sx={{ display: { xs: "none", md: "table" }, minWidth: 1100 }} aria-label="Live incident queue">
-        <TableHead>
+        <TableHead sx={{ "& .MuiTableCell-head": { position: "sticky", top: 0, zIndex: 2 } }}>
           <TableRow>
             <TableCell>
               <TableSortLabel active={sortKey === "incident"} direction={sortKey === "incident" ? sortDirection : "asc"} onClick={() => handleSort("incident")}>
@@ -417,38 +485,52 @@ export function IncidentTable({
           </TableRow>
         </TableHead>
         <TableBody>
-          {visibleIncidents.map((incident) => (
+          {paginatedIncidents.map((incident) => {
+            const updates = updateState(incident);
+            return (
             <TableRow key={incident.id} hover sx={{ "&:last-child td": { borderBottom: 0 } }}>
               <TableCell>
                 <Stack direction="row" spacing={0.75} sx={{ alignItems: "center" }}>
                   <Box>
-                    <Typography variant="body2" color="secondary" sx={{ fontWeight: 900 }}>{incident.id}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{incident.deviceId}</Typography>
+                    <Button variant="text" size="small" onClick={() => onView?.(incident)} sx={{ minHeight: 32, p: 0, justifyContent: "flex-start", fontWeight: 900 }}>{incident.id}</Button>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{incident.sourceType} · {incident.reportingChannel ?? "Channel not recorded"}{incident.deviceId ? ` · ${incident.deviceId}` : ""}</Typography>
                   </Box>
-                  {showVoice && incident.voiceContext !== "No voice context" && (
+                  {showVoice && Boolean(incident.voiceContext && incident.voiceContext !== "No voice context") && (
                     <Tooltip title="Voice recording available"><VolumeUpOutlinedIcon color="primary" fontSize="small" /></Tooltip>
                   )}
                 </Stack>
               </TableCell>
               <TableCell><AlertLevelChip alertLevel={incident.alertLevel} /></TableCell>
               <TableCell>{incident.category}</TableCell>
-              <TableCell sx={{ minWidth: 180 }}>{incident.location}</TableCell>
+              <TableCell sx={{ minWidth: 180, maxWidth: 280 }}>
+                <Tooltip title={incident.location}>
+                  <Typography variant="body2" noWrap>{incident.location}</Typography>
+                </Tooltip>
+              </TableCell>
               <TableCell sx={{ minWidth: 170 }}>{reportedContent(incident)}</TableCell>
               <TableCell sx={{ minWidth: 170, fontWeight: 700 }}>{incident.assignedResponder}</TableCell>
               <TableCell><StatusChip status={incident.status} /></TableCell>
               <TableCell align="right" sx={{ position: "sticky", right: 0, zIndex: 2, bgcolor: "background.paper", boxShadow: "-6px 0 10px rgba(11,31,51,0.05)" }}>
-                <Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
-                  {updateButton(incident)}
-                  <Button size="small" variant="contained" onClick={() => onView?.(incident)}>Open</Button>
-                </Stack>
+                <IncidentActionsMenu incidentId={incident.id} fieldNoteCount={updates.count} unreadUpdates={updates.unread} urgentUpdates={updates.urgent} onOpen={() => onView?.(incident)} onViewUpdates={() => handleViewUpdates(incident)} />
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
           {!visibleIncidents.length && (
             <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5, color: "text.secondary" }}>No incidents match the selected filters.</TableCell></TableRow>
           )}
         </TableBody>
       </Table>
+      <TablePagination
+        component="div"
+        count={visibleIncidents.length}
+        page={Math.min(page, Math.max(0, Math.ceil(visibleIncidents.length / rowsPerPage) - 1))}
+        onPageChange={(_, nextPage) => setPage(nextPage)}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }}
+        rowsPerPageOptions={[10, 25, 50]}
+        labelRowsPerPage="Incidents per page"
+      />
     </TableContainer>
   );
 }

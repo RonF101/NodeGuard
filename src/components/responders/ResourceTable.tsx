@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import AssignmentIndIcon from "@mui/icons-material/AssignmentInd";
+import AssignmentReturnOutlinedIcon from "@mui/icons-material/AssignmentReturnOutlined";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Paper from "@mui/material/Paper";
@@ -21,6 +23,8 @@ import { ResponseResource } from "@/types";
 type ResourceTableProps = {
   resources: ResponseResource[];
   onAssign: (resource: ResponseResource) => void;
+  onRelease: (resource: ResponseResource) => void;
+  onUpdateStatus: (resource: ResponseResource) => void;
 };
 
 type SortKey = keyof Pick<
@@ -35,12 +39,17 @@ const resourceColumns: Array<{ label: string; key: SortKey }> = [
   { label: "Agency / Owner", key: "agency" },
   { label: "Status", key: "status" },
   { label: "Base Location", key: "baseLocation" },
-  { label: "Assigned Team", key: "assignedIncident" },
+  { label: "Assigned Incident", key: "assignedIncident" },
   { label: "Capacity / Notes", key: "notes" },
   { label: "Last Updated", key: "lastUpdated" }
 ];
 
-export function ResourceTable({ resources, onAssign }: ResourceTableProps) {
+export function ResourceTable({
+  resources,
+  onAssign,
+  onRelease,
+  onUpdateStatus,
+}: ResourceTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("status");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
@@ -83,6 +92,7 @@ export function ResourceTable({ resources, onAssign }: ResourceTableProps) {
                   ["Assigned Incident", resource.assignedIncident],
                   ["Last Updated", `${formatPhilippineDateTime(resource.lastUpdated)} PHT`],
                   ["Capacity / Notes", resource.notes],
+                  ["Availability Note", resource.availabilityNote ?? "No condition note recorded"],
                 ].map(([label, value]) => (
                   <Box key={label} sx={{ minWidth: 0 }}>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{label}</Typography>
@@ -90,15 +100,37 @@ export function ResourceTable({ resources, onAssign }: ResourceTableProps) {
                   </Box>
                 ))}
               </Box>
-              <Button
-                fullWidth
-                sx={{ mt: 1.5 }}
-                startIcon={<AssignmentIndIcon />}
-                disabled={!canAssign}
-                onClick={() => onAssign(resource)}
-              >
-                Assign to Team
-              </Button>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1.5 }}>
+                {canAssign && (
+                  <Button
+                    fullWidth
+                    startIcon={<AssignmentIndIcon />}
+                    onClick={() => onAssign(resource)}
+                  >
+                    Assign to Incident
+                  </Button>
+                )}
+                {resource.status === "Dispatched" ? (
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    color="warning"
+                    startIcon={<AssignmentReturnOutlinedIcon />}
+                    onClick={() => onRelease(resource)}
+                  >
+                    Release
+                  </Button>
+                ) : (
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    startIcon={<BuildOutlinedIcon />}
+                    onClick={() => onUpdateStatus(resource)}
+                  >
+                    Update Availability
+                  </Button>
+                )}
+              </Stack>
             </Box>
           );
         })}
@@ -135,17 +167,47 @@ export function ResourceTable({ resources, onAssign }: ResourceTableProps) {
                 </TableCell>
                 <TableCell>{resource.baseLocation}</TableCell>
                 <TableCell>{resource.assignedIncident}</TableCell>
-                <TableCell sx={{ minWidth: 220 }}>{resource.notes}</TableCell>
+                <TableCell sx={{ minWidth: 240 }}>
+                  <Typography variant="body2">{resource.notes}</Typography>
+                  {resource.availabilityNote && (
+                    <Typography variant="caption" color="text.secondary">
+                      {resource.availabilityNote}
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell>{formatPhilippineDateTime(resource.lastUpdated)} PHT</TableCell>
                 <TableCell align="right">
-                  <Button
-                    size="small"
-                    startIcon={<AssignmentIndIcon />}
-                    disabled={!canAssign}
-                    onClick={() => onAssign(resource)}
-                  >
-                    Assign to Team
-                  </Button>
+                  <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
+                    {canAssign && (
+                      <Button
+                        size="small"
+                        startIcon={<AssignmentIndIcon />}
+                        onClick={() => onAssign(resource)}
+                      >
+                        Assign
+                      </Button>
+                    )}
+                    {resource.status === "Dispatched" ? (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        startIcon={<AssignmentReturnOutlinedIcon />}
+                        onClick={() => onRelease(resource)}
+                      >
+                        Release
+                      </Button>
+                    ) : (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<BuildOutlinedIcon />}
+                        onClick={() => onUpdateStatus(resource)}
+                      >
+                        Availability
+                      </Button>
+                    )}
+                  </Stack>
                 </TableCell>
               </TableRow>
             );

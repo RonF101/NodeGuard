@@ -224,7 +224,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 18),
                     const Text(
-                      'Access is limited to authorized MDRRMO, EMS, BFP, PNP, and barangay response personnel.',
+                      'Access is limited to assigned field responders and authorized barangay or LT-MDRRMO response personnel.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: AppColors.mutedText),
                     ),

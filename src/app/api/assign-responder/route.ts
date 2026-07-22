@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { assignResponderToIncident } from "@/lib/nodeguardRepository";
-import { AuthorizationError, requireRequestActor } from "@/lib/auth";
+import { AuthorizationError, requireRequestActor, requireResponderAssignmentPermission } from "@/lib/auth";
 import { sendAssignmentSms } from "@/lib/sms";
 
 export async function POST(request: Request) {
   try {
-    const actor = await requireRequestActor(request, ["personnel", "admin", "super_admin"]);
+    const actor = await requireRequestActor(request, ["barangay_admin", "barangay_personnel", "mdrrmo_admin", "mdrrmo_operations", "admin", "super_admin"]);
     const body = (await request.json()) as {
       responderId?: string;
       incidentId?: string;
+      instructions?: string;
     };
 
     if (!body.responderId || !body.incidentId) {
@@ -17,11 +18,23 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    await requireResponderAssignmentPermission(actor, body.responderId, body.incidentId);
+
+    const instructions = body.instructions?.trim() ?? "";
+    if (instructions.length > 1000) {
+      return NextResponse.json(
+        { ok: false, reason: "Dispatch instructions must be 1,000 characters or fewer." },
+        { status: 400 },
+      );
+    }
 
     const result = await assignResponderToIncident(
       body.responderId,
       body.incidentId,
-      actor.demo ? undefined : actor.id,
+      actor.id,
+      actor.organizationName ?? (actor.organizationType === "Barangay" ? "Barangay Operations" : "LT-MDRRMO"),
+      instructions,
+      actor.name,
     );
     const sms = result.ok && !actor.demo
       ? await sendAssignmentSms(body.responderId, body.incidentId)

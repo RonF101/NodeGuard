@@ -55,4 +55,12 @@ describe("IncidentTable header behavior", () => {
     expect(screen.queryByText("NG-CRITICAL")).not.toBeInTheDocument();
     expect(screen.queryByText("NG-UNASSESSED")).not.toBeInTheDocument();
   });
+
+  it("paginates large incident lists while keeping the table readable", () => {
+    const largeList = Array.from({ length: 30 }, (_, index) => incident(`NG-${String(index + 1).padStart(3, "0")}`, "Moderate", "Medical Emergency", `2026-07-${String((index % 20) + 1).padStart(2, "0")}T09:00:00+08:00`));
+    render(<IncidentTable incidents={largeList} showFilters={false} />);
+    expect(screen.getByText("1–10 of 30")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Go to next page"));
+    expect(screen.getByText("11–20 of 30")).toBeInTheDocument();
+  });
 });

@@ -174,7 +174,7 @@ class _MainShellState extends State<MainShell> {
         break;
       }
     }
-    if (incident == null || incident.isCompleted) return;
+    if (incident == null || incident.isResponderTerminal) return;
     _lastAlertedAssignmentId = assignmentId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -291,6 +291,18 @@ class _MainShellState extends State<MainShell> {
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
+          table: 'resource_assignments',
+          callback: (_) => unawaited(_loadSharedData()),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'response_resources',
+          callback: (_) => unawaited(_loadSharedData()),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
           table: 'notifications',
           callback: (_) => unawaited(_loadSharedData()),
         )
@@ -364,14 +376,15 @@ class _MainShellState extends State<MainShell> {
           _replaceIncidentStatus(_allIncidents, id, status, remarks);
 
       final active = _assignedIncidents
-          .where((incident) => !incident.isCompleted)
+          .where((incident) => !incident.isResponderTerminal)
           .toList();
       _responder = _responder.copyWith(
           currentAssignment:
               active.isEmpty ? 'No active assignment' : active.first.id);
       if (status == IncidentStatus.resolved ||
           status == IncidentStatus.closed ||
-          status == IncidentStatus.falseAlert) {
+          status == IncidentStatus.falseAlert ||
+          status == IncidentStatus.unableToRespond) {
         _selectedIndex = 3;
       }
     });
@@ -456,8 +469,9 @@ class _MainShellState extends State<MainShell> {
         onIncidentResolved: () => setState(() => _selectedIndex = 3),
       ),
       MapScreen(
-        incidents:
-            _allIncidents.where((incident) => !incident.isCompleted).toList(),
+        incidents: _allIncidents
+            .where((incident) => !incident.isResponderTerminal)
+            .toList(),
         onIncidentStatusChanged: _updateIncident,
       ),
       BackupRequestsScreen(

@@ -13,20 +13,20 @@ import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
-import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
 import Grid from "@mui/material/Grid";
 import InputAdornment from "@mui/material/InputAdornment";
+import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { BrandLogo } from "@/components/BrandLogo";
 import {
   getSupabaseClient,
-  isNodeGuardDemoMode,
   isSupabaseConfigured,
 } from "@/lib/supabaseClient";
 import { mdrrmoPalette } from "@/theme/theme";
+import type { OperationalRole } from "@/types";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,22 +34,26 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [demoRole, setDemoRole] = useState<OperationalRole>("barangay_personnel");
 
-  const demoMode = isNodeGuardDemoMode();
   const configured = isSupabaseConfigured();
 
   useEffect(() => {
-    if (demoMode) {
-      router.replace("/dashboard");
-      return;
-    }
-
     const supabase = getSupabaseClient();
     if (!supabase) return;
     void supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace("/dashboard");
+      if (!data.session) return;
+      void fetch("/api/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: data.session.access_token }),
+      })
+        .then((response) => response.json())
+        .then((result: { ok: boolean; home?: string }) => {
+          if (result.ok && result.home) router.replace(result.home);
+        });
     });
-  }, [demoMode, router]);
+  }, [router]);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -58,7 +62,19 @@ export default function LoginPage() {
     const supabase = getSupabaseClient();
 
     if (!supabase) {
-      router.push("/dashboard");
+      window.localStorage.setItem("nodeguard.demo-role", demoRole);
+      const response = await fetch("/api/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ demoRole }),
+      });
+      const result = (await response.json()) as { ok: boolean; home?: string; reason?: string };
+      setIsSubmitting(false);
+      if (!result.ok || !result.home) {
+        setError(result.reason ?? "Unable to open the selected workspace.");
+        return;
+      }
+      router.push(result.home);
       return;
     }
 
@@ -70,41 +86,26 @@ export default function LoginPage() {
       return;
     }
 
-    const user = (await supabase.auth.getUser()).data.user;
-    const { data: profile } = user
-      ? await supabase
-          .from("profiles")
-          .select("role, is_active")
-          .eq("id", user.id)
-          .maybeSingle()
-      : { data: null };
-    if (!profile || profile.is_active === false) {
+    const session = (await supabase.auth.getSession()).data.session;
+    if (!session) {
       await supabase.auth.signOut();
-      setError("This account is not linked to an authorized NodeGuard profile.");
+      setError("NodeGuard could not establish the dashboard session.");
       return;
     }
-
-    router.push("/dashboard");
+    const response = await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken: session.access_token }),
+    });
+    const result = (await response.json()) as { ok: boolean; home?: string; reason?: string };
+    if (!result.ok || !result.home) {
+      await supabase.auth.signOut();
+      setError(result.reason ?? "This account is not linked to an authorized NodeGuard profile.");
+      return;
+    }
+    router.push(result.home);
   };
 
-  if (demoMode) {
-    return (
-      <Stack
-        spacing={2}
-        sx={{
-          minHeight: "100vh",
-          alignItems: "center",
-          justifyContent: "center",
-          bgcolor: "background.default",
-        }}
-      >
-        <CircularProgress color="secondary" />
-        <Typography color="text.secondary" sx={{ fontWeight: 700 }}>
-          Opening the NodeGuard public demo...
-        </Typography>
-      </Stack>
-    );
-  }
 
   return (
     <Box
@@ -150,15 +151,15 @@ export default function LoginPage() {
                     <Box>
                       <Typography variant="h4">NodeGuard</Typography>
                       <Typography sx={{ color: mdrrmoPalette.cream, fontWeight: 700 }}>
-                        Emergency Coordination Dashboard
+                        Municipal Incident Management
                       </Typography>
                     </Box>
                   </Stack>
                   <Typography variant="h3" sx={{ maxWidth: 520 }}>
-                    La Trinidad MDRRMO operations dashboard for coordinated response.
+                    One incident record for every report, response, and resolution.
                   </Typography>
                   <Typography sx={{ mt: 2, color: "rgba(255,255,255,0.78)", maxWidth: 520 }}>
-                    Monitor NodeGuard alerts, verify field reports, assign responders, and review incident records from one calm control surface.
+                    Barangays manage local incidents, LT-MDRRMO records and coordinates municipal cases, and IoT nodes provide an additional public reporting option where installed.
                   </Typography>
                 </Box>
                 <Box
@@ -182,12 +183,20 @@ export default function LoginPage() {
             <CardContent sx={{ p: { xs: 2, sm: 3, md: 5 } }}>
               <BrandLogo />
               <Typography variant="h4" color="secondary" sx={{ mt: 4 }}>
-                Personnel Login
+                Authorized Personnel Login
               </Typography>
               <Typography color="text.secondary" sx={{ mt: 1 }}>
-                La Trinidad MDRRMO Emergency Coordination Dashboard
+                Your role and organization determine the operational workspace.
               </Typography>
               <Stack component="form" onSubmit={handleLogin} spacing={2.2} sx={{ mt: 4 }}>
+                {!configured && (
+                  <TextField select label="Demo workspace" value={demoRole} onChange={(event) => setDemoRole(event.target.value as OperationalRole)}>
+                    <MenuItem value="barangay_personnel">Barangay Pico Personnel</MenuItem>
+                    <MenuItem value="barangay_admin">Barangay Pico Administrator</MenuItem>
+                    <MenuItem value="mdrrmo_operations">LT-MDRRMO Operations</MenuItem>
+                    <MenuItem value="mdrrmo_admin">LT-MDRRMO Administrator</MenuItem>
+                  </TextField>
+                )}
                 <TextField
                   label="Email"
                   placeholder="personnel@ltdrrmo.local"
@@ -225,10 +234,11 @@ export default function LoginPage() {
                   }}
                 />
                 <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-                  {["Personnel", "Admin", "Super Admin"].map((role) => (
+                  {["Barangay Personnel Dashboard", "LT-MDRRMO Personnel Dashboard"].map((role) => (
                     <Chip key={role} label={role} icon={<AdminPanelSettingsIcon />} variant="outlined" />
                   ))}
                 </Stack>
+                <Typography variant="caption" color="text.secondary">Field responders receive assignments and submit field updates through the NodeGuard Personnel mobile application, not the controller dashboard.</Typography>
                 {error && <Alert severity="error">{error}</Alert>}
                 <Button size="large" type="submit" disabled={isSubmitting}>
                   {isSubmitting

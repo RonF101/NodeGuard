@@ -35,14 +35,14 @@ function toReport(incident: Incident, index: number): Report {
     incidentId: incident.id,
     category: incident.category,
     location: incident.location,
-    status: incident.status === "False Alert" ? "Closed" : incident.status,
+    status: incident.status,
     closedAt: incident.resolvedAt ?? incident.latestFieldNoteAt ?? incident.timestamp,
     responseTime: incident.responseTimeMinutes === undefined ? "Not recorded" : `${incident.responseTimeMinutes} min`,
     leadAgency: incident.assignedResponder || "Unassigned",
   };
 }
 
-export default function ReportsPage() {
+export function IncidentReports({ environment = "mdrrmo" }: { environment?: "barangay" | "mdrrmo" }) {
   const [reportData, setReportData] = useState<Report[]>(isSupabaseConfigured() ? [] : reports);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
@@ -69,16 +69,18 @@ export default function ReportsPage() {
   const loadReports = useCallback(async () => {
     try {
       const incidents = await fetchIncidents();
+      const visibleIncidents = environment === "barangay" && !isSupabaseConfigured()
+        ? incidents.filter((incident) => incident.barangayId === "brgy-pico")
+        : incidents;
       setReportData(
-        incidents
-          .filter((incident) => ["Resolved", "Closed", "False Alert"].includes(incident.status))
+        visibleIncidents
           .map(toReport),
       );
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load incident reports.");
     }
-  }, []);
+  }, [environment]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void loadReports(), 0);
@@ -95,7 +97,7 @@ export default function ReportsPage() {
       return `"${formulaSafe.replaceAll('"', '""')}"`;
     };
     const rows = [
-      ["Report ID", "Incident ID", "Category", "Location", "Status", "Closed At", "Response Time", "Lead Agency"],
+      ["Report ID", "Incident ID", "Category", "Location", "Status", "Record Date", "Response Time", "Lead Agency"],
       ...items.map((report) => [
         report.id,
         report.incidentId,
@@ -128,7 +130,7 @@ export default function ReportsPage() {
 
   return (
     <AppShell>
-      <PageHeader eyebrow="Incident Records" title="Reports" />
+      <PageHeader eyebrow={environment === "barangay" ? "Barangay Incident Reporting" : "NodeGuard Central Records"} title="Reports" subtitle={environment === "barangay" ? "Generate reports from every incident recorded for your barangay, including ordinary reports, IoT alerts, local resolutions, and escalations." : "Generate municipal reports from every incident entered or generated in NodeGuard, regardless of its original reporting channel."} />
       {loadError && <Alert severity="error" sx={{ mb: 3 }}>{loadError}</Alert>}
       <Card sx={{ mb: 3 }}>
         <CardContent>
@@ -178,7 +180,7 @@ export default function ReportsPage() {
                 </Typography>
                 <Typography sx={{ mt: 1 }}>{report.location}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Closed: {formatPhilippineDateTime(report.closedAt)} PHT
+                  Record date: {formatPhilippineDateTime(report.closedAt)} PHT
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Lead Agency: {report.leadAgency} - Response Time: {report.responseTime}
@@ -215,7 +217,7 @@ export default function ReportsPage() {
                   ["Category", selectedReport.category],
                   ["Location", selectedReport.location],
                   ["Status", selectedReport.status],
-                  ["Closed At", `${formatPhilippineDateTime(selectedReport.closedAt)} PHT`],
+                  ["Record Date", `${formatPhilippineDateTime(selectedReport.closedAt)} PHT`],
                   ["Lead Agency", selectedReport.leadAgency],
                   ["Response Time", selectedReport.responseTime]
                 ].map(([label, value]) => (
@@ -251,4 +253,8 @@ export default function ReportsPage() {
       </Dialog>
     </AppShell>
   );
+}
+
+export default function ReportsPage() {
+  return <IncidentReports environment="mdrrmo" />;
 }

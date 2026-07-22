@@ -29,7 +29,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final activeIncidents =
-        incidents.where((incident) => !incident.isCompleted).toList();
+        incidents.where((incident) => !incident.isResponderTerminal).toList();
     final sortedIncidents = sortIncidentsByAlertLevel(activeIncidents);
     final active = activeIncidents.length;
     final inResponse = activeIncidents

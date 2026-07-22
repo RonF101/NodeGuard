@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import 'alert_level.dart';
 import 'backup_request.dart';
+import 'response_resource.dart';
 
 enum IncidentCategory { medical, security, fireDisaster }
 
@@ -12,6 +13,7 @@ enum IncidentStatus {
   enRoute,
   onScene,
   responding,
+  unableToRespond,
   resolved,
   closed,
   needBackup,
@@ -55,6 +57,8 @@ extension IncidentStatusLabel on IncidentStatus {
         return 'On Scene';
       case IncidentStatus.responding:
         return 'Responding';
+      case IncidentStatus.unableToRespond:
+        return 'Unable to Respond';
       case IncidentStatus.resolved:
         return 'Resolved';
       case IncidentStatus.closed:
@@ -78,6 +82,8 @@ extension IncidentStatusLabel on IncidentStatus {
         return AppColors.goRed;
       case IncidentStatus.responding:
         return AppColors.goRed;
+      case IncidentStatus.unableToRespond:
+        return AppColors.alertRed;
       case IncidentStatus.resolved:
         return AppColors.successGreen;
       case IncidentStatus.closed:
@@ -96,8 +102,8 @@ class Incident {
     required this.category,
     required this.locationName,
     required this.approximateAddress,
-    required this.deviceId,
-    required this.nodeLocation,
+    this.deviceId,
+    this.nodeLocation,
     required this.timestamp,
     required this.alertLevel,
     required this.status,
@@ -117,16 +123,30 @@ class Incident {
     this.assignedResponders = const [],
     this.activityHistory = const [],
     this.backupRequest,
+    this.assignedResources = const [],
+    this.barangayName,
+    this.assignmentSource,
+    this.assignmentInstructions,
+    this.assignmentAcknowledgedAt,
+    this.cameraCaptureUrl,
     this.voiceUrl,
     this.voiceTranscript,
+    this.sourceType = 'Manual Entry',
+    this.reportingChannel = 'Not recorded',
+    this.reportingPersonOrSource,
+    this.reportingOffice,
+    this.incidentSubtype,
+    this.landmark,
+    this.personsAffected,
+    this.affectedPersonsCondition,
   });
 
   final String id;
   final IncidentCategory category;
   final String locationName;
   final String approximateAddress;
-  final String deviceId;
-  final String nodeLocation;
+  final String? deviceId;
+  final String? nodeLocation;
   final DateTime timestamp;
   final IncidentAlertLevel alertLevel;
   final DateTime? alertLevelUpdatedAt;
@@ -148,11 +168,30 @@ class Incident {
   final String? voiceTranscript;
   final List<String> activityHistory;
   final BackupRequest? backupRequest;
+  final List<ResponseResource> assignedResources;
+  final String? barangayName;
+  final String? assignmentSource;
+  final String? assignmentInstructions;
+  final DateTime? assignmentAcknowledgedAt;
+  final String? cameraCaptureUrl;
+  final String sourceType;
+  final String reportingChannel;
+  final String? reportingPersonOrSource;
+  final String? reportingOffice;
+  final String? incidentSubtype;
+  final String? landmark;
+  final int? personsAffected;
+  final String? affectedPersonsCondition;
+
+  bool get isIotGenerated => sourceType == 'IoT Node' && deviceId != null;
 
   bool get isCompleted =>
       status == IncidentStatus.resolved ||
       status == IncidentStatus.closed ||
       status == IncidentStatus.falseAlert;
+
+  bool get isResponderTerminal =>
+      isCompleted || status == IncidentStatus.unableToRespond;
 
   Incident copyWith({
     IncidentStatus? status,
@@ -167,6 +206,12 @@ class Incident {
     List<String>? assignedResponders,
     List<String>? activityHistory,
     BackupRequest? backupRequest,
+    List<ResponseResource>? assignedResources,
+    String? barangayName,
+    String? assignmentSource,
+    String? assignmentInstructions,
+    DateTime? assignmentAcknowledgedAt,
+    String? cameraCaptureUrl,
   }) {
     return Incident(
       id: id,
@@ -198,6 +243,22 @@ class Incident {
       voiceTranscript: voiceTranscript,
       activityHistory: activityHistory ?? this.activityHistory,
       backupRequest: backupRequest ?? this.backupRequest,
+      assignedResources: assignedResources ?? this.assignedResources,
+      barangayName: barangayName ?? this.barangayName,
+      assignmentSource: assignmentSource ?? this.assignmentSource,
+      assignmentInstructions:
+          assignmentInstructions ?? this.assignmentInstructions,
+      assignmentAcknowledgedAt:
+          assignmentAcknowledgedAt ?? this.assignmentAcknowledgedAt,
+      cameraCaptureUrl: cameraCaptureUrl ?? this.cameraCaptureUrl,
+      sourceType: sourceType,
+      reportingChannel: reportingChannel,
+      reportingPersonOrSource: reportingPersonOrSource,
+      reportingOffice: reportingOffice,
+      incidentSubtype: incidentSubtype,
+      landmark: landmark,
+      personsAffected: personsAffected,
+      affectedPersonsCondition: affectedPersonsCondition,
     );
   }
 }

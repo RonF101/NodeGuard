@@ -71,7 +71,7 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
               const SizedBox(height: 10),
               const Text(
-                'La Trinidad MDRRMO Emergency Response Application',
+                'NodeGuard Assigned Responder Application',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     color: AppColors.cream,

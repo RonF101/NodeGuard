@@ -140,6 +140,12 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
   }
 
   Future<void> _submit() async {
+    if (_selectedStatus == IncidentStatus.unableToRespond &&
+        _remarksController.text.trim().isEmpty) {
+      setState(() => _error =
+          'Explain why the assigned team is unable to respond so dispatch can reassign safely.');
+      return;
+    }
     if (_selectedStatus == IncidentStatus.resolved &&
         !await _confirmResolvedStatus()) {
       return;
@@ -304,18 +310,32 @@ class _StatusUpdateSheetState extends State<StatusUpdateSheet> {
 List<IncidentStatus> responderStatusTransitions(IncidentStatus current) {
   switch (current) {
     case IncidentStatus.assigned:
-      return const [IncidentStatus.enRoute];
+      return const [
+        IncidentStatus.enRoute,
+        IncidentStatus.unableToRespond,
+      ];
     case IncidentStatus.enRoute:
-      return const [IncidentStatus.onScene];
+      return const [
+        IncidentStatus.onScene,
+        IncidentStatus.unableToRespond,
+      ];
     case IncidentStatus.onScene:
-      return const [IncidentStatus.responding, IncidentStatus.resolved];
+      return const [
+        IncidentStatus.responding,
+        IncidentStatus.resolved,
+        IncidentStatus.unableToRespond,
+      ];
     case IncidentStatus.responding:
     case IncidentStatus.needBackup:
-      return const [IncidentStatus.resolved];
+      return const [
+        IncidentStatus.resolved,
+        IncidentStatus.unableToRespond,
+      ];
     case IncidentStatus.newAlert:
     case IncidentStatus.resolved:
     case IncidentStatus.closed:
     case IncidentStatus.falseAlert:
+    case IncidentStatus.unableToRespond:
       return const [];
   }
 }

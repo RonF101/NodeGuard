@@ -10,7 +10,9 @@ class AppColors {
   static const navy = Color(0xFF0B1F33);
   static const softGray = Color(0xFFF4F7FA);
   static const successGreen = Color(0xFF1F7A4D);
+  static const successSoft = Color(0xFFE8F5EE);
   static const warningAmber = Color(0xFF946200);
+  static const warningSoft = Color(0xFFFFF4D6);
   static const textDark = Color(0xFF172B3A);
   static const mutedText = Color(0xFF52606D);
   static const border = Color(0xFFD9E2EC);

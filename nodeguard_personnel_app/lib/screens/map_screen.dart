@@ -27,7 +27,7 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   late Incident? _selectedIncident = widget.selectedIncident ??
-      widget.incidents.firstWhere((incident) => !incident.isCompleted,
+      widget.incidents.firstWhere((incident) => !incident.isResponderTerminal,
           orElse: () => widget.incidents.first);
 
   @override
@@ -145,7 +145,9 @@ class _IncidentLocationCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Text(incident.deviceId,
+            Text(
+                incident.deviceId ??
+                    '${incident.sourceType} · ${incident.reportingChannel}',
                 style: const TextStyle(
                     color: AppColors.deepGreen, fontWeight: FontWeight.w900)),
             const SizedBox(height: 6),

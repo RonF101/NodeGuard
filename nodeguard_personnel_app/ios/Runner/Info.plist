@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>NodeGuard responders can attach incident photos captured during an assigned response.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NodeGuard responders can select supporting incident photos from the device library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

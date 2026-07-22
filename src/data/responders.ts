@@ -4,6 +4,7 @@ import { demoMinutesAgo } from "@/data/demoClock";
 export const responders: Responder[] = [
   {
     id: "RESP-001",
+    organizationType: "LT-MDRRMO",
     name: "MDRRMO Field Team Alpha",
     agency: "MDRRMO Rescue Unit",
     role: "Rescue Team Lead",
@@ -14,6 +15,9 @@ export const responders: Responder[] = [
   },
   {
     id: "RESP-002",
+    barangayId: "brgy-pico",
+    barangayName: "Pico",
+    organizationType: "Barangay",
     name: "EMS Team Alpha",
     agency: "EMS",
     role: "Medical Response Team",
@@ -24,6 +28,7 @@ export const responders: Responder[] = [
   },
   {
     id: "RESP-003",
+    organizationType: "LT-MDRRMO",
     name: "BFP La Trinidad Unit 1",
     agency: "BFP",
     role: "Fire Suppression Crew",
@@ -34,6 +39,7 @@ export const responders: Responder[] = [
   },
   {
     id: "RESP-004",
+    organizationType: "LT-MDRRMO",
     name: "LT PNP Patrol 2",
     agency: "PNP",
     role: "Public Safety Patrol",
@@ -44,6 +50,9 @@ export const responders: Responder[] = [
   },
   {
     id: "RESP-005",
+    barangayId: "brgy-pico",
+    barangayName: "Pico",
+    organizationType: "Barangay",
     name: "Barangay Pico Response Desk",
     agency: "Barangay Responders",
     role: "Barangay First Response",
@@ -54,6 +63,7 @@ export const responders: Responder[] = [
   },
   {
     id: "RESP-006",
+    organizationType: "LT-MDRRMO",
     name: "MDRRMO Field Team Bravo",
     agency: "MDRRMO Rescue Unit",
     role: "Rescue Support Team",
@@ -64,6 +74,9 @@ export const responders: Responder[] = [
   },
   {
     id: "RESP-007",
+    barangayId: "brgy-puguis",
+    barangayName: "Puguis",
+    organizationType: "Barangay",
     name: "EMS Team Bravo",
     agency: "EMS",
     role: "Ambulance Crew",
@@ -74,6 +87,7 @@ export const responders: Responder[] = [
   },
   {
     id: "RESP-008",
+    organizationType: "LT-MDRRMO",
     name: "MDRRMO Radio Operator",
     agency: "MDRRMO",
     role: "Communications",

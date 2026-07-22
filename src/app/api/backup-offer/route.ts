@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { AuthorizationError, requireRequestActor } from "@/lib/auth";
+import { AuthorizationError, requireBackupOfferPermission, requireRequestActor } from "@/lib/auth";
 import { decideBackupOffer } from "@/lib/nodeguardRepository";
 
 export async function POST(request: Request) {
   try {
     const actor = await requireRequestActor(request, [
-      "personnel",
+      "barangay_admin",
+      "barangay_personnel",
+      "mdrrmo_admin",
+      "mdrrmo_operations",
       "admin",
       "super_admin",
     ]);
@@ -25,6 +28,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    await requireBackupOfferPermission(actor, body.offerId);
     const result = await decideBackupOffer(
       body.offerId,
       body.decision,

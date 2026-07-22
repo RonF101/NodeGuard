@@ -11,14 +11,45 @@ import {
   BackupRequest,
   BackupRequestStatus,
   DeviceNode,
+  EmergencyCategory,
   Incident,
+  IncidentAttachment,
   IncidentStatus,
+  EscalationStatus,
+  IncidentSourceType,
+  IncidentManagementMode,
+  ReportingChannel,
+  BarangayOperatingHours,
   Responder,
   ResponseResource,
+  ValidationResult,
   ValidationStatus,
 } from "@/types";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+import { authorizedFetch } from "@/lib/auth";
 import { mapAlertLevelToDatabase, mapDatabaseAlertLevel } from "@/config/alertLevels";
+import {
+  demoAcknowledgeAfterHours,
+  demoAcknowledgeEscalation,
+  demoAddFieldUpdate,
+  demoAssignResource,
+  demoAssignResponder,
+  demoClassifyIncident,
+  demoCloseIncident,
+  demoCreateIncident,
+  demoEscalateIncident,
+  demoReleaseResource,
+  demoRemoveResponder,
+  demoSetDeviceBuzzer,
+  demoSetValidationStatus,
+  demoSimulateNodeActivation,
+  demoUpdateAlertLevel,
+  demoUpdateDeviceStatus,
+  demoUpdateIncidentStatus,
+  demoUpdateOperatingHours,
+  demoUpdateResource,
+  getDemoState,
+} from "@/lib/nodeguardDemoStore";
 
 export class NodeGuardRepositoryError extends Error {
   constructor(message: string) {
@@ -27,14 +58,75 @@ export class NodeGuardRepositoryError extends Error {
   }
 }
 
+type DemoStateResponse = {
+  ok: boolean;
+  reason?: string;
+  incidents: Incident[];
+  responders: Responder[];
+  resources: ResponseResource[];
+  nodes: DeviceNode[];
+  operatingHours: BarangayOperatingHours[];
+};
+
+async function fetchDemoState() {
+  const response = await authorizedFetch("/api/demo-state", { cache: "no-store" });
+  const result = (await response.json()) as DemoStateResponse;
+  if (!response.ok || !result.ok) {
+    throw new NodeGuardRepositoryError(result.reason ?? "Unable to load prototype data.");
+  }
+  return result;
+}
+
 type IncidentRow = {
   id?: string;
   public_id: string;
   category: "medical" | "security_public_safety" | "fire_disaster";
-  device_id: string;
+  device_id: string | null;
+  source_type?: "node_alert" | "barangay_report" | "manual_entry" | "iot_node";
+  reporting_channel?: string | null;
+  intake_organization?: string | null;
+  management_mode?: string | null;
+  managing_organization?: string | null;
+  reporting_office?: string | null;
+  incident_subtype?: string | null;
+  nearby_landmark?: string | null;
+  reported_at?: string | null;
+  affected_persons_condition?: string | null;
+  initial_notes?: string | null;
+  after_hours_alert?: boolean | null;
+  barangay_acknowledgement_due_at?: string | null;
+  barangay_acknowledged_at?: string | null;
+  mdrrmo_fallback_claimed_at?: string | null;
+  barangay_id?: string | null;
+  barangays?: { name: string } | Array<{ name: string }> | null;
+  incident_description?: string | null;
+  persons_affected?: number | null;
+  reporting_person_source?: string | null;
+  camera_capture_path?: string | null;
+  validation_result?: string | null;
+  validation_notes?: string | null;
+  validated_at?: string | null;
+  escalation_status?: string | null;
+  escalation_reason?: string | null;
+  escalated_at?: string | null;
+  mdrrmo_acknowledged_at?: string | null;
+  mdrrmo_acknowledgement_notes?: string | null;
+  actions_taken?: string | null;
+  resolution_details?: string | null;
+  closure_details?: string | null;
+  assignment_source?: string | null;
+  assignment_instructions?: string | null;
+  incident_attachments?: Array<{
+    id: string;
+    storage_path: string;
+    media_type: "camera_capture" | "voice_recording" | "field_attachment" | "report_attachment";
+    created_at: string;
+  }>;
   location_name: string;
   occurred_at: string;
   status:
+    | "reported"
+    | "pending_validation"
     | "new_alert"
     | "assigned"
     | "en_route"
@@ -43,8 +135,14 @@ type IncidentRow = {
     | "resolved"
     | "closed"
     | "need_backup"
-    | "false_alert";
-  trigger_method: "button" | "voice";
+    | "false_alert"
+    | "validated"
+    | "dispatched"
+    | "escalated"
+    | "coordinated_by_mdrrmo"
+    | "unable_to_respond"
+    | "cancelled";
+  trigger_method: "button" | "voice" | null;
   voice_context_available: boolean;
   caller_context: string;
   approximate_address?: string;
@@ -68,7 +166,7 @@ type IncidentRow = {
   }>;
   incident_activity_events?: Array<{
     id: string;
-    event_type: "backup" | "assignment" | "status";
+    event_type: string;
     message: string;
     actor_name: string | null;
     actor_role: string | null;
@@ -77,6 +175,7 @@ type IncidentRow = {
     created_at: string;
   }>;
   backup_requests?: BackupRequestRow[];
+  resource_assignments?: ResourceAssignmentRow[];
   incident_status_updates?: Array<{
     remarks: string | null;
     created_at: string;
@@ -155,6 +254,9 @@ type ResponderRow = {
   availability: "available" | "dispatched" | "busy" | "offline";
   current_assignment: string | null;
   last_status_update: string;
+  barangay_id?: string | null;
+  organization_type?: "barangay" | "mdrrmo";
+  barangays?: { name: string } | Array<{ name: string }> | null;
 };
 
 type ResponderAssignmentRow = {
@@ -174,6 +276,11 @@ type DeviceLocationRow = {
   zone?: string;
   status: "online" | "maintenance" | "offline";
   updated_at?: string;
+  barangay_id?: string | null;
+  camera_available?: boolean;
+  device_health?: string;
+  category_buttons?: Array<"medical" | "security_public_safety" | "fire_disaster">;
+  barangays?: { name: string } | Array<{ name: string }> | null;
 };
 
 type ResourceRow = {
@@ -185,11 +292,25 @@ type ResourceRow = {
   base_location: string;
   assigned_incident_public_id: string | null;
   notes: string | null;
+  availability_note?: string | null;
   updated_at: string;
+  barangay_id?: string | null;
+  organization_type?: "barangay" | "mdrrmo";
+  barangays?: { name: string } | Array<{ name: string }> | null;
 };
 
+type ResourceAssignmentRow = {
+  id: string;
+  assigned_at: string;
+  released_at: string | null;
+  response_resources?: ResourceRow | ResourceRow[] | null;
+};
+
+const incidentSelectOperational =
+  "id, public_id, source_type, reporting_channel, intake_organization, management_mode, managing_organization, reporting_office, incident_subtype, nearby_landmark, reported_at, affected_persons_condition, initial_notes, after_hours_alert, barangay_acknowledgement_due_at, barangay_acknowledged_at, mdrrmo_fallback_claimed_at, barangay_id, barangays(name), category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, validation_status, validation_result, validation_notes, validated_at, incident_description, persons_affected, reporting_person_source, camera_capture_path, escalation_status, escalation_reason, escalated_at, mdrrmo_acknowledged_at, mdrrmo_acknowledgement_notes, actions_taken, resolution_details, closure_details, assignment_source, assignment_instructions, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, priority_updated_at, priority_updated_by, priority_update_source, priority_update_reason, incident_attachments(id, storage_path, media_type, created_at), incident_status_updates(remarks, created_at, status), incident_priority_updates(id, previous_priority, new_priority, actor_name, actor_role, source, reason, created_at), incident_activity_events(id, event_type, message, actor_name, actor_role, source, reason, created_at), backup_requests(id, public_id, status, requested_at, requested_by, requesting_team, assistance_types, responders_needed, reason, urgency, fulfilled_at, cancelled_at, cancellation_reason, backup_offers(id, responder_id, status, offered_at, decided_at, decision_note, responders(name, availability))), resource_assignments(id, assigned_at, released_at, response_resources(public_code, resource_type, unit_name, agency, status, base_location, assigned_incident_public_id, notes, availability_note, updated_at, barangay_id, organization_type, barangays(name))), device_locations(buzzer_active, buzzer_updated_at), voice_contexts(storage_path, transcript, duration_seconds)";
+
 const incidentSelectEnhanced =
-  "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, validation_status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, priority_updated_at, priority_updated_by, priority_update_source, priority_update_reason, incident_status_updates(remarks, created_at, status), incident_priority_updates(id, previous_priority, new_priority, actor_name, actor_role, source, reason, created_at), incident_activity_events(id, event_type, message, actor_name, actor_role, source, reason, created_at), backup_requests(id, public_id, status, requested_at, requested_by, requesting_team, assistance_types, responders_needed, reason, urgency, fulfilled_at, cancelled_at, cancellation_reason, backup_offers(id, responder_id, status, offered_at, decided_at, decision_note, responders(name, availability))), device_locations(buzzer_active, buzzer_updated_at), voice_contexts(storage_path, transcript, duration_seconds)";
+  "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, validation_status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, priority_updated_at, priority_updated_by, priority_update_source, priority_update_reason, incident_status_updates(remarks, created_at, status), incident_priority_updates(id, previous_priority, new_priority, actor_name, actor_role, source, reason, created_at), incident_activity_events(id, event_type, message, actor_name, actor_role, source, reason, created_at), backup_requests(id, public_id, status, requested_at, requested_by, requesting_team, assistance_types, responders_needed, reason, urgency, fulfilled_at, cancelled_at, cancellation_reason, backup_offers(id, responder_id, status, offered_at, decided_at, decision_note, responders(name, availability))), resource_assignments(id, assigned_at, released_at, response_resources(public_code, resource_type, unit_name, agency, status, base_location, assigned_incident_public_id, notes, availability_note, updated_at)), device_locations(buzzer_active, buzzer_updated_at), voice_contexts(storage_path, transcript, duration_seconds)";
 
 const incidentSelectWithBuzzer =
   "id, public_id, category, device_id, location_name, approximate_address, node_location, coordinates, occurred_at, status, trigger_method, voice_context_available, voice_duration, caller_context, assigned_responder_name, priority, incident_status_updates(remarks, created_at, status), device_locations(buzzer_active, buzzer_updated_at)";
@@ -199,14 +320,25 @@ const incidentSelectWithoutBuzzer =
 
 export async function fetchIncidents(): Promise<Incident[]> {
   const supabase = getSupabaseClient();
-  if (!supabase) return mockIncidents;
+  if (!supabase) {
+    return typeof window === "undefined" ? mockIncidents : (await fetchDemoState()).incidents;
+  }
 
-  const enhanced = await supabase
+  const operational = await supabase
     .from("incidents")
-    .select(incidentSelectEnhanced)
-    .order("occurred_at", { ascending: false });
-  let data: unknown = enhanced.data;
-  let error = enhanced.error;
+    .select(incidentSelectOperational)
+    .order("reported_at", { ascending: false });
+  let data: unknown = operational.data;
+  let error = operational.error;
+
+  if (error) {
+    const enhanced = await supabase
+      .from("incidents")
+      .select(incidentSelectEnhanced)
+      .order("occurred_at", { ascending: false });
+    data = enhanced.data;
+    error = enhanced.error;
+  }
 
   if (error) {
     const buzzerRetry = await supabase
@@ -239,20 +371,31 @@ export async function fetchIncidents(): Promise<Incident[]> {
 
 export async function fetchResponders(): Promise<Responder[]> {
   const supabase = getSupabaseClient();
-  if (!supabase) return mockResponders;
+  if (!supabase) {
+    return typeof window === "undefined" ? mockResponders : (await fetchDemoState()).responders;
+  }
 
-  const [responderResult, assignmentResult] = await Promise.all([
-    supabase
+  const enhancedResponders = await supabase
       .from("responders")
       .select(
-        "id, profile_id, public_code, name, agency_unit, role, contact_number, availability, current_assignment, last_status_update",
+        "id, profile_id, public_code, name, agency_unit, role, contact_number, availability, current_assignment, last_status_update, barangay_id, organization_type, barangays(name)",
       )
-      .order("name"),
-    supabase
+      .order("name");
+  let responderData: unknown = enhancedResponders.data;
+  let responderError = enhancedResponders.error;
+  if (responderError) {
+    const legacyResponders = await supabase
+      .from("responders")
+      .select("id, profile_id, public_code, name, agency_unit, role, contact_number, availability, current_assignment, last_status_update")
+      .order("name");
+    responderData = legacyResponders.data;
+    responderError = legacyResponders.error;
+  }
+  const assignmentResult = await supabase
       .from("incidents")
-      .select("public_id, status, assigned_responder_name"),
-  ]);
-  const { data, error } = responderResult;
+      .select("public_id, status, assigned_responder_name");
+  const data = responderData;
+  const error = responderError;
 
   if (error || !data) {
     throw new NodeGuardRepositoryError(
@@ -286,8 +429,12 @@ export async function fetchResponders(): Promise<Responder[]> {
     const recordedAssignmentIsFinal =
       recordedAssignment && finalDbStatuses.includes(recordedAssignment.status);
 
+    const barangay = Array.isArray(row.barangays) ? row.barangays[0] : row.barangays;
     return {
       id: row.public_code,
+      barangayId: row.barangay_id ?? undefined,
+      barangayName: barangay?.name,
+      organizationType: row.organization_type === "barangay" ? "Barangay" as const : "LT-MDRRMO" as const,
       name: row.name,
       agency: row.agency_unit,
       role: row.role,
@@ -309,14 +456,28 @@ export async function fetchResponders(): Promise<Responder[]> {
 
 export async function fetchDeviceNodes(): Promise<DeviceNode[]> {
   const supabase = getSupabaseClient();
-  if (!supabase) return mockDeviceNodes;
+  if (!supabase) {
+    return typeof window === "undefined" ? mockDeviceNodes : (await fetchDemoState()).nodes;
+  }
 
-  const { data, error } = await supabase
+  const enhancedDevices = await supabase
     .from("device_locations")
     .select(
-      "device_id, name, location_name, approximate_address, coordinates, map_x, map_y, zone, status, updated_at",
+      "device_id, name, location_name, approximate_address, coordinates, map_x, map_y, zone, status, updated_at, barangay_id, camera_available, device_health, category_buttons, barangays(name)",
     )
     .order("device_id");
+  let deviceData: unknown = enhancedDevices.data;
+  let deviceError = enhancedDevices.error;
+  if (deviceError) {
+    const legacyDevices = await supabase
+      .from("device_locations")
+      .select("device_id, name, location_name, approximate_address, coordinates, map_x, map_y, zone, status, updated_at")
+      .order("device_id");
+    deviceData = legacyDevices.data;
+    deviceError = legacyDevices.error;
+  }
+  const data = deviceData;
+  const error = deviceError;
 
   if (error || !data) {
     throw new NodeGuardRepositoryError(
@@ -324,8 +485,12 @@ export async function fetchDeviceNodes(): Promise<DeviceNode[]> {
     );
   }
 
-  return (data as DeviceLocationRow[]).map((row) => ({
+  return (data as DeviceLocationRow[]).map((row) => {
+    const barangay = Array.isArray(row.barangays) ? row.barangays[0] : row.barangays;
+    return {
     id: row.device_id,
+    barangayId: row.barangay_id ?? undefined,
+    barangayName: barangay?.name,
     name: row.name,
     location: row.location_name,
     coordinates: {
@@ -349,27 +514,50 @@ export async function fetchDeviceNodes(): Promise<DeviceNode[]> {
         : row.status === "offline"
           ? "Connectivity inspection required"
           : "No open maintenance",
-  }));
+    cameraAvailable: row.camera_available ?? false,
+    deviceHealth: row.device_health ?? (row.status === "online" ? "Healthy" : "Attention required"),
+    categoryButtons: row.category_buttons?.map(mapCategory),
+  };
+  });
 }
 
 export async function fetchResources(): Promise<ResponseResource[]> {
   const supabase = getSupabaseClient();
-  if (!supabase) return mockResources;
+  if (!supabase) {
+    return typeof window === "undefined" ? mockResources : (await fetchDemoState()).resources;
+  }
 
-  const { data, error } = await supabase
+  const enhancedResources = await supabase
     .from("response_resources")
     .select(
-      "public_code, resource_type, unit_name, agency, status, base_location, assigned_incident_public_id, notes, updated_at",
+      "public_code, resource_type, unit_name, agency, status, base_location, assigned_incident_public_id, notes, availability_note, updated_at, barangay_id, organization_type, barangays(name)",
     )
     .order("public_code");
+  let resourceData: unknown = enhancedResources.data;
+  let resourceError = enhancedResources.error;
+  if (resourceError) {
+    const legacyResources = await supabase
+      .from("response_resources")
+      .select("public_code, resource_type, unit_name, agency, status, base_location, assigned_incident_public_id, notes, availability_note, updated_at")
+      .order("public_code");
+    resourceData = legacyResources.data;
+    resourceError = legacyResources.error;
+  }
+  const data = resourceData;
+  const error = resourceError;
   if (error || !data) {
     throw new NodeGuardRepositoryError(
       `Unable to load response resources: ${error?.message ?? "No data returned."}`,
     );
   }
 
-  return (data as ResourceRow[]).map((row) => ({
+  return (data as ResourceRow[]).map((row) => {
+    const barangay = Array.isArray(row.barangays) ? row.barangays[0] : row.barangays;
+    return {
     id: row.public_code,
+    barangayId: row.barangay_id ?? undefined,
+    barangayName: barangay?.name,
+    organizationType: row.organization_type === "barangay" ? "Barangay" as const : "LT-MDRRMO" as const,
     type: row.resource_type,
     unitName: row.unit_name,
     agency: row.agency,
@@ -377,8 +565,10 @@ export async function fetchResources(): Promise<ResponseResource[]> {
     baseLocation: row.base_location,
     assignedIncident: row.assigned_incident_public_id ?? "None",
     notes: row.notes ?? "",
+    availabilityNote: row.availability_note ?? undefined,
     lastUpdated: formatTimestamp(row.updated_at),
-  }));
+  };
+  });
 }
 
 export async function submitIncidentStatusUpdate(
@@ -412,11 +602,12 @@ export async function submitIncidentStatusUpdate(
 
 export async function updateIncidentWorkflowStatus(
   publicId: string,
-  status: Extract<IncidentStatus, "Responding" | "On Scene" | "Closed">,
+  status: Extract<IncidentStatus, "Dispatched" | "Responding" | "On Scene" | "Resolved" | "Closed">,
   actorId?: string,
+  actorName = "Demo operator",
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase) return { ok: true, reason: "Demo status update completed locally." };
+  if (!supabase) return demoUpdateIncidentStatus(publicId, status, actorName);
 
   const { error } = await supabase.rpc("update_nodeguard_incident_status", {
     p_incident_public_id: publicId,
@@ -440,13 +631,10 @@ export async function updateIncidentAlertLevel(
   source: "dashboard" | "personnel_app",
   reason?: string,
   actorId?: string,
+  actorName = "Demo operator",
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase) {
-    const incident = mockIncidents.find((item) => item.id === publicId);
-    if (!incident) return { ok: false, reason: "Incident not found." };
-    return { ok: true, reason: "Demo alert-level update completed locally." };
-  }
+  if (!supabase) return demoUpdateAlertLevel(publicId, alertLevel, reason, actorName);
 
   const { data, error } = await supabase.rpc("update_nodeguard_alert_level", {
     p_incident_public_id: publicId,
@@ -502,22 +690,12 @@ export async function assignResponderToIncident(
   responderPublicCode: string,
   incidentPublicId: string,
   actorId?: string,
+  assignmentSource = "NodeGuard Operations",
+  assignmentInstructions = "",
+  actorName = assignmentSource,
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase) {
-    const incident = mockIncidents.find((item) => item.id === incidentPublicId);
-    const responder = mockResponders.find((item) => item.id === responderPublicCode);
-    if (!incident || !responder) {
-      return { ok: false, reason: "Incident or responder/team was not found." };
-    }
-    if (responder.availability !== "Available") {
-      return {
-        ok: false,
-        reason: `${responder.name} is unavailable because the team is currently assigned to ${responder.currentAssignment}.`,
-      };
-    }
-    return { ok: true, reason: "Demo assignment completed locally." };
-  }
+  if (!supabase) return demoAssignResponder(incidentPublicId, responderPublicCode, assignmentInstructions, actorName);
 
   const { data: responder, error: responderError } = await supabase
     .from("responders")
@@ -558,6 +736,8 @@ export async function assignResponderToIncident(
   const rpc = await supabase.rpc("assign_nodeguard_responder", {
     p_responder_code: responderPublicCode,
     p_incident_public_id: incidentPublicId,
+    p_assignment_source: assignmentSource,
+    p_instructions: assignmentInstructions || null,
     p_actor_id: actorId ?? null,
   });
   if (!rpc.error) return { ok: true };
@@ -576,13 +756,10 @@ export async function assignResponderToIncident(
 export async function removeResponderFromIncident(
   incidentPublicId: string,
   actorId?: string,
+  actorName = "Demo operator",
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase) {
-    const incident = mockIncidents.find((item) => item.id === incidentPublicId);
-    if (!incident) return { ok: false, reason: "Incident not found." };
-    return { ok: true, reason: "Demo team removal completed locally." };
-  }
+  if (!supabase) return demoRemoveResponder(incidentPublicId, actorName);
 
   const { error } = await supabase.rpc("unassign_nodeguard_responder", {
     p_incident_public_id: incidentPublicId,
@@ -601,10 +778,10 @@ export async function assignResourceToIncident(
   resourcePublicCode: string,
   incidentPublicId: string,
   actorId?: string,
+  actorName = "Demo operator",
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase)
-    return { ok: true, reason: "Demo resource assignment completed locally." };
+  if (!supabase) return demoAssignResource(incidentPublicId, resourcePublicCode, actorName);
 
   const { error } = await supabase.rpc("assign_nodeguard_resource", {
     p_resource_code: resourcePublicCode,
@@ -614,28 +791,52 @@ export async function assignResourceToIncident(
   return error ? { ok: false, reason: error.message } : { ok: true };
 }
 
+export async function releaseResourceFromIncident(
+  resourcePublicCode: string,
+  reason: string,
+  nextStatus: Exclude<ResponseResource["status"], "Dispatched">,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoReleaseResource(resourcePublicCode, nextStatus, reason, actorName);
+
+  const { error } = await supabase.rpc("release_nodeguard_resource", {
+    p_resource_code: resourcePublicCode,
+    p_reason: reason,
+    p_next_status: mapResourceStatusToDatabase(nextStatus),
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true };
+}
+
+export async function updateResourceAvailability(
+  resourcePublicCode: string,
+  status: Exclude<ResponseResource["status"], "Dispatched">,
+  reason: string,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoUpdateResource(resourcePublicCode, status, reason, actorName);
+
+  const { error } = await supabase.rpc("set_nodeguard_resource_status", {
+    p_resource_code: resourcePublicCode,
+    p_status: mapResourceStatusToDatabase(status),
+    p_reason: reason,
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true };
+}
+
 export async function validateIncident(
   incidentPublicId: string,
   validationStatus: ValidationStatus,
   actorId?: string,
+  actorName = "Demo operator",
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase) {
-    const incident = mockIncidents.find((item) => item.id === incidentPublicId);
-    if (!incident) return { ok: false, reason: "Incident not found." };
-    if (incident.validationStatus === validationStatus) {
-      return {
-        ok: false,
-        reason:
-          validationStatus === "Confirmed"
-            ? "This alert is already verified."
-            : validationStatus === "False Alarm"
-              ? "This incident is already marked as a false alert."
-              : "This alert is already pending review.",
-      };
-    }
-    return { ok: true, reason: "Demo alert validation completed locally." };
-  }
+  if (!supabase) return demoSetValidationStatus(incidentPublicId, validationStatus, actorName);
 
   const dbStatus =
     validationStatus === "Confirmed"
@@ -676,14 +877,312 @@ export async function validateIncident(
   return error ? { ok: false, reason: error.message } : { ok: true };
 }
 
+const validationResultValues: Record<ValidationResult, string> = {
+  Validated: "validated",
+  "Accidental Activation": "accidental_activation",
+  "Duplicate Report": "duplicate_report",
+  "Non-Emergency": "non_emergency",
+  Unverified: "unverified",
+  "False or Misleading Report": "false_or_misleading",
+  "Fraudulent, Hoax, or Prank Report": "fraudulent_hoax_prank",
+};
+
+export async function classifyIncident(
+  incidentPublicId: string,
+  result: ValidationResult,
+  notes: string,
+  actorId?: string,
+  details: { method?: string; contacted?: string; evidence?: string } = {},
+  actorName = "Demo operator",
+) {
+  if (!notes.trim()) return { ok: false, reason: "Validation notes are required." };
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoClassifyIncident(incidentPublicId, {
+    result,
+    notes: notes.trim(),
+    method: details.method?.trim() || "Record and source review",
+    contacted: details.contacted?.trim() || "Not recorded",
+    evidence: details.evidence?.trim() || "Available incident record",
+  }, actorName);
+  const { data, error } = await supabase.rpc("classify_nodeguard_incident", {
+    p_incident_public_id: incidentPublicId,
+    p_validation_result: validationResultValues[result],
+    p_notes: notes.trim(),
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true, data };
+}
+
+export async function escalateIncident(
+  incidentPublicId: string,
+  reason: string,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  if (!reason.trim()) return { ok: false, reason: "An escalation reason is required." };
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoEscalateIncident(incidentPublicId, reason.trim(), actorName);
+  const { data, error } = await supabase.rpc("escalate_nodeguard_incident", {
+    p_incident_public_id: incidentPublicId,
+    p_reason: reason.trim(),
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true, data };
+}
+
+export async function acknowledgeEscalation(
+  incidentPublicId: string,
+  notes: string,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  if (!notes.trim()) return { ok: false, reason: "Acknowledgement notes are required." };
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoAcknowledgeEscalation(incidentPublicId, notes.trim(), actorName);
+  const { data, error } = await supabase.rpc("acknowledge_nodeguard_escalation", {
+    p_incident_public_id: incidentPublicId,
+    p_notes: notes.trim(),
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true, data };
+}
+
+export type BarangayIncidentReportInput = {
+  barangayId: string;
+  category: Incident["category"];
+  occurredAt: string;
+  location: string;
+  approximateAddress: string;
+  coordinates?: string;
+  description: string;
+  personsAffected: number;
+  reportingSource: string;
+  actionsTaken: string;
+};
+
+export async function createBarangayIncidentReport(
+  input: BarangayIncidentReportInput,
+  actorId?: string,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { ok: true, incidentId: `NG-BRGY-DEMO-${Date.now().toString().slice(-6)}` };
+  }
+  const category = input.category === "Medical Emergency"
+    ? "medical"
+    : input.category === "Security/Public Safety"
+      ? "security_public_safety"
+      : "fire_disaster";
+  const { data, error } = await supabase.rpc("create_barangay_incident_report", {
+    p_barangay_id: input.barangayId,
+    p_category: category,
+    p_occurred_at: input.occurredAt,
+    p_location_name: input.location.trim(),
+    p_approximate_address: input.approximateAddress.trim(),
+    p_coordinates: input.coordinates?.trim() || null,
+    p_description: input.description.trim(),
+    p_persons_affected: Math.max(0, input.personsAffected),
+    p_reporting_source: input.reportingSource.trim(),
+    p_actions_taken: input.actionsTaken.trim(),
+    p_actor_id: actorId ?? null,
+  });
+  if (error) return { ok: false, reason: error.message };
+  const payload = data as { incident_id?: string } | null;
+  return { ok: true, incidentId: payload?.incident_id };
+}
+
+export type IncidentIntakeInput = {
+  reportingChannel: ReportingChannel;
+  reportingSource: string;
+  reporterContact?: string;
+  reportingOffice?: string;
+  category: Incident["category"];
+  incidentSubtype?: string;
+  description: string;
+  location: string;
+  landmark?: string;
+  barangayId?: string;
+  reportedAt: string;
+  occurredAt?: string;
+  personsAffected: number;
+  affectedPersonsCondition?: string;
+  alertLevel: AlertLevel;
+  actionsTaken?: string;
+  initialNotes?: string;
+  managementMode?: IncidentManagementMode;
+};
+
+const reportingChannelToDatabase: Record<ReportingChannel, string> = {
+  "Emergency Hotline": "emergency_hotline",
+  "Mobile Call": "mobile_call",
+  "SMS / Text Message": "sms",
+  "Social Media Message": "social_media",
+  Email: "email",
+  "Walk-in Report": "walk_in",
+  Radio: "radio",
+  "Barangay Personnel": "barangay_personnel",
+  "LT-MDRRMO Personnel": "mdrrmo_personnel",
+  "Field Responder": "field_responder",
+  "Partner Office / Organization": "partner_office",
+  "IoT Alert Node": "iot_node",
+  Other: "other",
+};
+
+const managementModeToDatabase: Record<IncidentManagementMode, string> = {
+  "Barangay Managed": "barangay_managed",
+  "Referred to Barangay": "referred_to_barangay",
+  "Barangay Validation Requested": "barangay_validation_requested",
+  "LT-MDRRMO Direct": "mdrrmo_direct",
+  "Municipal Coordination": "municipal_coordination",
+};
+
+export async function createIncidentReport(
+  input: IncidentIntakeInput,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  if (input.reportingChannel === "IoT Alert Node") {
+    return { ok: false, reason: "IoT alerts are created automatically by registered nodes." };
+  }
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    const incident = demoCreateIncident(input, actorName);
+    return { ok: true, incidentId: incident.id, incident };
+  }
+  const category = input.category === "Medical Emergency"
+    ? "medical"
+    : input.category === "Security/Public Safety"
+      ? "security_public_safety"
+      : "fire_disaster";
+  const priority = input.alertLevel === "Moderate"
+    ? "medium"
+    : input.alertLevel.toLowerCase();
+  const { data, error } = await supabase.rpc("create_nodeguard_incident_report", {
+    p_reporting_channel: reportingChannelToDatabase[input.reportingChannel],
+    p_reporting_source: input.reportingSource.trim(),
+    p_reporting_office: input.reportingOffice?.trim() || null,
+    p_category: category,
+    p_incident_subtype: input.incidentSubtype?.trim() || null,
+    p_description: input.description.trim(),
+    p_location_name: input.location.trim(),
+    p_landmark: input.landmark?.trim() || null,
+    p_barangay_id: input.barangayId || null,
+    p_reported_at: input.reportedAt,
+    p_occurred_at: input.occurredAt || null,
+    p_persons_affected: Math.max(0, input.personsAffected),
+    p_affected_persons_condition: input.affectedPersonsCondition?.trim() || null,
+    p_priority: priority,
+    p_actions_taken: input.actionsTaken?.trim() || "",
+    p_initial_notes: input.initialNotes?.trim() || "",
+    p_management_mode: input.managementMode
+      ? managementModeToDatabase[input.managementMode]
+      : null,
+    p_actor_id: actorId ?? null,
+  });
+  if (error) return { ok: false, reason: error.message };
+  const payload = data as { incident_id?: string; management_mode?: string } | null;
+  return { ok: true, incidentId: payload?.incident_id, managementMode: payload?.management_mode };
+}
+
+export async function acknowledgeAfterHoursAlert(
+  incidentPublicId: string,
+  action: "barangay_acknowledge" | "mdrrmo_claim",
+  notes: string,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoAcknowledgeAfterHours(incidentPublicId, action, notes, actorName);
+  const { data, error } = await supabase.rpc("acknowledge_nodeguard_after_hours_alert", {
+    p_incident_public_id: incidentPublicId,
+    p_action: action,
+    p_notes: notes.trim(),
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true, data };
+}
+
+export async function fetchBarangayOperatingHours(
+  barangayId?: string,
+): Promise<BarangayOperatingHours[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    if (typeof window !== "undefined") {
+      const settings = (await fetchDemoState()).operatingHours;
+      return barangayId ? settings.filter((setting) => setting.barangayId === barangayId) : settings;
+    }
+    const settings = getDemoState().operatingHours;
+    return barangayId ? settings.filter((setting) => setting.barangayId === barangayId) : settings;
+  }
+  let query = supabase
+    .from("barangay_operating_hours")
+    .select("barangay_id, timezone, staffed_days, opens_at, closes_at, acknowledgement_minutes, is_enabled")
+    .order("barangay_id");
+  if (barangayId) query = query.eq("barangay_id", barangayId);
+  const { data, error } = await query;
+  if (error) throw new NodeGuardRepositoryError(error.message);
+  return (data ?? []).map((row) => ({
+    barangayId: row.barangay_id,
+    timezone: row.timezone,
+    staffedDays: row.staffed_days,
+    opensAt: String(row.opens_at).slice(0, 5),
+    closesAt: String(row.closes_at).slice(0, 5),
+    acknowledgementMinutes: row.acknowledgement_minutes,
+    isEnabled: row.is_enabled,
+  }));
+}
+
+export async function updateBarangayOperatingHours(
+  setting: BarangayOperatingHours,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoUpdateOperatingHours(setting, actorName);
+  const { data, error } = await supabase.rpc("set_barangay_operating_hours", {
+    p_barangay_id: setting.barangayId,
+    p_staffed_days: setting.staffedDays,
+    p_opens_at: setting.opensAt,
+    p_closes_at: setting.closesAt,
+    p_acknowledgement_minutes: setting.acknowledgementMinutes,
+    p_is_enabled: setting.isEnabled,
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true, data };
+}
+
+export async function closeIncidentRecord(
+  incidentPublicId: string,
+  actionsTaken: string,
+  resultOutcome: string,
+  closureNotes: string,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoCloseIncident(incidentPublicId, actionsTaken, resultOutcome, closureNotes, actorName);
+  const { data, error } = await supabase.rpc("close_nodeguard_incident", {
+    p_incident_public_id: incidentPublicId,
+    p_actions_taken: actionsTaken.trim(),
+    p_result_outcome: resultOutcome.trim(),
+    p_closure_notes: closureNotes.trim(),
+    p_actor_id: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true, data };
+}
+
 export async function updateDeviceStatus(
   deviceId: string,
   status: "online" | "maintenance" | "offline",
   actorId?: string,
+  actorName = "Demo operator",
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase)
-    return { ok: true, reason: "Demo device status updated locally." };
+  if (!supabase) return demoUpdateDeviceStatus(
+    deviceId,
+    status === "online" ? "Online" : status === "maintenance" ? "Maintenance" : "Offline",
+    actorName,
+  );
 
   const { data, error } = await supabase
     .from("device_locations")
@@ -711,10 +1210,10 @@ export async function setDeviceBuzzer(
   active: boolean,
   source: "dashboard" | "personnel_app" = "dashboard",
   actorId?: string,
+  actorName = "Demo operator",
 ) {
   const supabase = getSupabaseClient();
-  if (!supabase)
-    return { ok: true, reason: "Demo buzzer command completed locally." };
+  if (!supabase) return demoSetDeviceBuzzer(deviceId, active, actorName);
 
   const { error } = await supabase.rpc("set_device_buzzer", {
     p_device_id: deviceId,
@@ -724,6 +1223,47 @@ export async function setDeviceBuzzer(
   });
 
   return error ? { ok: false, reason: error.message } : { ok: true };
+}
+
+export async function addIncidentFieldUpdate(
+  incidentPublicId: string,
+  remarks: string,
+  actorId?: string,
+  actorName = "Demo operator",
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return demoAddFieldUpdate(incidentPublicId, remarks, actorName);
+  const { data: incident, error: incidentError } = await supabase
+    .from("incidents")
+    .select("id, status")
+    .eq("public_id", incidentPublicId)
+    .maybeSingle();
+  if (incidentError || !incident) {
+    return { ok: false, reason: incidentError?.message ?? "Incident not found." };
+  }
+  const { error } = await supabase.from("incident_status_updates").insert({
+    incident_id: incident.id,
+    status: incident.status,
+    remarks: remarks.trim(),
+    created_by: actorId ?? null,
+  });
+  return error ? { ok: false, reason: error.message } : { ok: true };
+}
+
+export async function simulateNodeActivation(
+  deviceId: string,
+  category: EmergencyCategory,
+  actorName: string,
+  forceAfterHours = false,
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return demoSimulateNodeActivation(deviceId, category, actorName, forceAfterHours);
+  }
+  return {
+    ok: false as const,
+    reason: "Dashboard simulation is available only in prototype mode. Production node activations must be authenticated by the device-ingestion service.",
+  };
 }
 
 async function mapIncidentRow(
@@ -768,7 +1308,15 @@ async function mapIncidentRow(
         ? "Assignment" as const
         : event.event_type === "status"
           ? "Status" as const
-          : "Backup" as const,
+          : event.event_type === "validation"
+            ? "Validation" as const
+            : event.event_type === "report" || event.event_type === "closure"
+              ? "Report" as const
+              : event.event_type.startsWith("after_hours")
+                ? "Coordination" as const
+            : event.event_type.includes("escalat")
+              ? "Escalation" as const
+              : "Backup" as const,
     message: event.message,
     actorName: event.actor_name ?? undefined,
     actorRole: event.actor_role ?? undefined,
@@ -784,6 +1332,30 @@ async function mapIncidentRow(
       request.status,
     ),
   ) ?? backupRows[0];
+  const assignedResources: ResponseResource[] = (row.resource_assignments ?? [])
+    .filter((assignment) => !assignment.released_at)
+    .flatMap((assignment): ResponseResource[] => {
+      const resource = Array.isArray(assignment.response_resources)
+        ? assignment.response_resources[0]
+        : assignment.response_resources;
+      return resource
+        ? [{
+            id: resource.public_code,
+            barangayId: resource.barangay_id ?? undefined,
+            barangayName: (Array.isArray(resource.barangays) ? resource.barangays[0] : resource.barangays)?.name,
+            organizationType: resource.organization_type === "barangay" ? "Barangay" as const : "LT-MDRRMO" as const,
+            type: resource.resource_type,
+            unitName: resource.unit_name,
+            agency: resource.agency,
+            status: mapResourceStatus(resource.status),
+            baseLocation: resource.base_location,
+            assignedIncident: resource.assigned_incident_public_id ?? row.public_id,
+            notes: resource.notes ?? "",
+            availabilityNote: resource.availability_note ?? undefined,
+            lastUpdated: formatTimestamp(resource.updated_at),
+          }]
+        : [];
+    });
   let voiceUrl: string | undefined;
   if (voiceContext?.storage_path) {
     const { data } = await supabase.storage
@@ -791,20 +1363,68 @@ async function mapIncidentRow(
       .createSignedUrl(voiceContext.storage_path, 900);
     voiceUrl = data?.signedUrl;
   }
+  let cameraCaptureUrl: string | undefined;
+  if (row.camera_capture_path) {
+    const { data } = await supabase.storage
+      .from("incident-media")
+      .createSignedUrl(row.camera_capture_path, 900);
+    cameraCaptureUrl = data?.signedUrl;
+  }
+  const attachments: IncidentAttachment[] = (await Promise.all(
+    (row.incident_attachments ?? []).map(async (attachment) => {
+      const { data } = await supabase.storage
+        .from("incident-media")
+        .createSignedUrl(attachment.storage_path, 900);
+      if (!data?.signedUrl) return null;
+      const mediaType: IncidentAttachment["mediaType"] =
+        attachment.media_type === "camera_capture"
+          ? "Camera Capture"
+          : attachment.media_type === "voice_recording"
+            ? "Voice Recording"
+            : attachment.media_type === "field_attachment"
+              ? "Field Attachment"
+              : "Report Attachment";
+      return {
+        id: attachment.id,
+        mediaType,
+        fileName: attachment.storage_path.split("/").at(-1) ?? "Incident attachment",
+        url: data.signedUrl,
+        createdAt: formatTimestamp(attachment.created_at),
+      } satisfies IncidentAttachment;
+    }),
+  )).filter((attachment): attachment is IncidentAttachment => Boolean(attachment));
+  const barangay = Array.isArray(row.barangays) ? row.barangays[0] : row.barangays;
 
   return {
     id: row.public_id,
+    sourceType: mapSourceType(row.source_type),
+    reportingChannel: mapReportingChannel(row.reporting_channel, row.source_type),
+    intakeOrganization: row.intake_organization === "mdrrmo"
+      ? "LT-MDRRMO"
+      : row.intake_organization === "iot_node"
+        ? "IoT Node"
+        : "Barangay",
+    managementMode: mapManagementMode(row.management_mode),
+    barangayId: row.barangay_id ?? undefined,
+    barangayName: barangay?.name,
     category: mapCategory(row.category),
-    deviceId: row.device_id,
+    incidentSubtype: row.incident_subtype ?? undefined,
+    deviceId: row.device_id ?? undefined,
     location: row.location_name,
-    timestamp: formatTimestamp(row.occurred_at),
+    timestamp: formatTimestamp(row.reported_at ?? row.occurred_at),
+    reportedAt: formatTimestamp(row.reported_at ?? row.occurred_at),
+    occurredAt: formatTimestamp(row.occurred_at),
     status: mapStatus(row.status, row.validation_status),
-    triggerMethod: row.trigger_method === "button" ? "Button" : "Voice",
-    voiceContext: row.voice_context_available
-      ? "Voice clip attached"
-      : "No voice context",
-    callerContext: row.caller_context,
+    triggerMethod: row.trigger_method
+      ? row.trigger_method === "button" ? "Button" : "Voice"
+      : undefined,
+    voiceContext: row.source_type === "iot_node" || row.source_type === "node_alert"
+      ? row.voice_context_available ? "Voice clip attached" : "No voice context"
+      : undefined,
+    callerContext: row.incident_description ?? row.caller_context,
+    description: row.incident_description ?? row.caller_context,
     approximateAddress: row.approximate_address,
+    landmark: row.nearby_landmark ?? undefined,
     nodeLocation: row.node_location,
     coordinates: row.coordinates,
     assignedResponder: row.assigned_responder_name ?? "Unassigned",
@@ -832,8 +1452,45 @@ async function mapIncidentRow(
     resolvedAt: finalUpdate ? formatTimestamp(finalUpdate.created_at) : undefined,
     responseTimeMinutes: Number.isFinite(responseMinutes) ? responseMinutes : undefined,
     validationStatus: mapValidationStatus(row.validation_status, row.status),
+    validationResult: mapValidationResult(row.validation_result, row.validation_status),
+    validationNotes: row.validation_notes ?? undefined,
+    validatedAt: row.validated_at ? formatTimestamp(row.validated_at) : undefined,
+    cameraCaptureUrl,
+    personsAffected: row.persons_affected ?? undefined,
+    affectedPersonsCondition: row.affected_persons_condition ?? undefined,
+    reportingPersonOrSource: row.reporting_person_source ?? undefined,
+    reportingOffice: row.reporting_office ?? undefined,
+    initialNotes: row.initial_notes ?? undefined,
+    actionsTaken: row.actions_taken ?? undefined,
+    escalationStatus: mapEscalationStatus(row.escalation_status),
+    escalationReason: row.escalation_reason ?? undefined,
+    escalatedAt: row.escalated_at ? formatTimestamp(row.escalated_at) : undefined,
+    mdrrmoAcknowledgedAt: row.mdrrmo_acknowledged_at ? formatTimestamp(row.mdrrmo_acknowledged_at) : undefined,
+    resolutionDetails: row.resolution_details ?? undefined,
+    closureDetails: row.closure_details ?? undefined,
+    assignmentSource: row.assignment_source
+      ? row.assignment_source.toLowerCase().includes("mdrrmo")
+        ? "LT-MDRRMO"
+        : "Barangay"
+      : undefined,
+    assignmentInstructions: row.assignment_instructions ?? row.mdrrmo_acknowledgement_notes ?? undefined,
+    afterHoursAlert: row.after_hours_alert ?? false,
+    barangayAcknowledgementDueAt: row.barangay_acknowledgement_due_at
+      ? formatTimestamp(row.barangay_acknowledgement_due_at)
+      : undefined,
+    barangayAcknowledgedAt: row.barangay_acknowledged_at
+      ? formatTimestamp(row.barangay_acknowledged_at)
+      : undefined,
+    mdrrmoFallbackActive: Boolean(
+      row.mdrrmo_fallback_claimed_at
+      || (row.after_hours_alert
+        && !row.barangay_acknowledged_at
+        && row.barangay_acknowledgement_due_at
+        && new Date(row.barangay_acknowledgement_due_at).getTime() <= Date.now()),
+    ),
     voiceTranscript: voiceContext?.transcript ?? undefined,
     voiceUrl,
+    attachments,
     activityHistory: [
       ...priorityUpdates.map((update) => ({
         id: update.id,
@@ -848,6 +1505,7 @@ async function mapIncidentRow(
       ...activityEvents,
     ].toSorted((a, b) => b.createdAt.localeCompare(a.createdAt)),
     backupRequest: currentBackup ? mapBackupRequest(currentBackup, row.public_id) : undefined,
+    assignedResources,
   };
 }
 
@@ -941,8 +1599,78 @@ function mapValidationStatus(
 ): ValidationStatus {
   if (value === "confirmed") return "Confirmed";
   if (value === "false_alarm" || status === "false_alert") return "False Alarm";
-  if (value === "pending_review" || status === "new_alert") return "Pending Review";
+  if (value === "pending_review" || status === "new_alert" || status === "pending_validation" || status === "reported") return "Pending Review";
   return "Confirmed";
+}
+
+function mapSourceType(value: IncidentRow["source_type"]): IncidentSourceType {
+  return value === "node_alert" || value === "iot_node" ? "IoT Node" : "Manual Entry";
+}
+
+function mapReportingChannel(
+  value: string | null | undefined,
+  sourceType: IncidentRow["source_type"],
+): ReportingChannel {
+  const values: Record<string, ReportingChannel> = {
+    emergency_hotline: "Emergency Hotline",
+    mobile_call: "Mobile Call",
+    sms: "SMS / Text Message",
+    social_media: "Social Media Message",
+    email: "Email",
+    walk_in: "Walk-in Report",
+    radio: "Radio",
+    barangay_personnel: "Barangay Personnel",
+    mdrrmo_personnel: "LT-MDRRMO Personnel",
+    field_responder: "Field Responder",
+    partner_office: "Partner Office / Organization",
+    iot_node: "IoT Alert Node",
+    other: "Other",
+  };
+  if (value && values[value]) return values[value];
+  return sourceType === "node_alert" || sourceType === "iot_node"
+    ? "IoT Alert Node"
+    : "Barangay Personnel";
+}
+
+function mapManagementMode(value: string | null | undefined): IncidentManagementMode {
+  const values: Record<string, IncidentManagementMode> = {
+    barangay_managed: "Barangay Managed",
+    referred_to_barangay: "Referred to Barangay",
+    barangay_validation_requested: "Barangay Validation Requested",
+    mdrrmo_direct: "LT-MDRRMO Direct",
+    municipal_coordination: "Municipal Coordination",
+  };
+  return value && values[value] ? values[value] : "Barangay Managed";
+}
+
+function mapValidationResult(
+  value: IncidentRow["validation_result"],
+  legacy: IncidentRow["validation_status"],
+): ValidationResult {
+  const values: Record<string, ValidationResult> = {
+    validated: "Validated",
+    accidental_activation: "Accidental Activation",
+    duplicate_report: "Duplicate Report",
+    non_emergency: "Non-Emergency",
+    unverified: "Unverified",
+    false_or_misleading: "False or Misleading Report",
+    fraudulent_hoax_prank: "Fraudulent, Hoax, or Prank Report",
+  };
+  if (value && values[value]) return values[value];
+  if (legacy === "confirmed") return "Validated";
+  if (legacy === "false_alarm") return "Accidental Activation";
+  return "Unverified";
+}
+
+function mapEscalationStatus(value: string | null | undefined): EscalationStatus {
+  const values: Record<string, EscalationStatus> = {
+    pending_acknowledgement: "Pending Acknowledgement",
+    acknowledged: "Acknowledged",
+    coordinating: "Coordinating",
+    returned_to_barangay: "Returned to Barangay",
+    completed: "Completed",
+  };
+  return value && values[value] ? values[value] : "Not Escalated";
 }
 
 function mapResourceStatus(
@@ -962,6 +1690,15 @@ function mapResourceStatus(
   }
 }
 
+function mapResourceStatusToDatabase(
+  status: Exclude<ResponseResource["status"], "Dispatched">,
+) {
+  if (status === "Available") return "available";
+  if (status === "Under Maintenance") return "under_maintenance";
+  if (status === "Unavailable") return "unavailable";
+  return "reserved";
+}
+
 function mapCategory(category: IncidentRow["category"]): Incident["category"] {
   if (category === "medical") return "Medical Emergency";
   if (category === "security_public_safety") return "Security/Public Safety";
@@ -973,10 +1710,24 @@ function mapStatus(
   validationStatus?: IncidentRow["validation_status"],
 ): IncidentStatus {
   switch (status) {
+    case "reported":
+      return "Reported";
+    case "pending_validation":
+      return "Pending Validation";
     case "new_alert":
-      return validationStatus === "confirmed" ? "Verified" : "Pending Verification";
+      return validationStatus === "confirmed" ? "Validated" : "Pending Validation";
     case "assigned":
+      return "Assigned";
+    case "validated":
+      return "Validated";
+    case "dispatched":
       return "Dispatched";
+    case "escalated":
+      return "Responding";
+    case "coordinated_by_mdrrmo":
+      return "Responding";
+    case "unable_to_respond":
+      return "Unable to Respond";
     case "en_route":
       return "Dispatched";
     case "on_scene":
@@ -990,17 +1741,33 @@ function mapStatus(
     case "need_backup":
       return "Responding";
     case "false_alert":
-      return "False Alert";
+      return "Closed";
+    case "cancelled":
+      return "Cancelled";
   }
 }
 
 function mapWebStatusToDb(status: IncidentStatus) {
   switch (status) {
+    case "Reported":
+      return "reported";
+    case "Pending Validation":
+      return "pending_validation";
+    case "Validated":
+      return "validated";
+    case "Assigned":
+      return "assigned";
     case "Pending Verification":
     case "Verified":
       return "new_alert";
     case "Dispatched":
       return "en_route";
+    case "Escalated":
+      return "escalated";
+    case "Coordinated by LT-MDRRMO":
+      return "coordinated_by_mdrrmo";
+    case "Unable to Respond":
+      return "unable_to_respond";
     case "On Scene":
       return "on_scene";
     case "Responding":
@@ -1011,6 +1778,8 @@ function mapWebStatusToDb(status: IncidentStatus) {
       return "closed";
     case "False Alert":
       return "false_alert";
+    case "Cancelled":
+      return "cancelled";
   }
 }
 

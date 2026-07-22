@@ -5,7 +5,8 @@ export const users: User[] = [
     id: "USR-001",
     name: "Maria Santos",
     email: "m.santos@ltdrrmo.local",
-    role: "Super Admin",
+    role: "LT-MDRRMO Administrator",
+    organizationName: "LT-MDRRMO",
     status: "Active",
     lastActive: "2026-07-06 08:50"
   },
@@ -13,7 +14,8 @@ export const users: User[] = [
     id: "USR-002",
     name: "Joel Bautista",
     email: "j.bautista@ltdrrmo.local",
-    role: "Admin",
+    role: "LT-MDRRMO Operations",
+    organizationName: "LT-MDRRMO",
     status: "Active",
     lastActive: "2026-07-06 08:21"
   },
@@ -21,7 +23,9 @@ export const users: User[] = [
     id: "USR-003",
     name: "Anna Rivera",
     email: "a.rivera@ltdrrmo.local",
-    role: "Personnel",
+    role: "Barangay Administrator",
+    barangayId: "brgy-pico",
+    organizationName: "Barangay Pico",
     status: "Active",
     lastActive: "2026-07-06 07:58"
   },
@@ -29,7 +33,9 @@ export const users: User[] = [
     id: "USR-004",
     name: "Mark Dacumos",
     email: "m.dacumos@ltdrrmo.local",
-    role: "Personnel",
+    role: "Field Responder",
+    barangayId: "brgy-pico",
+    organizationName: "Barangay Pico",
     status: "Disabled",
     lastActive: "2026-06-30 17:12"
   }

@@ -1,7 +1,7 @@
 import Chip from "@mui/material/Chip";
 import { IncidentStatus, ResponderStatus, ResourceStatus } from "@/types";
 import { mdrrmoPalette } from "@/theme/theme";
-import { incidentStatusConfig } from "@/config/incidentOperations";
+import { getIncidentStatusLabel, incidentStatusConfig } from "@/config/incidentOperations";
 
 type StatusChipProps = {
   status: IncidentStatus | ResponderStatus | ResourceStatus | "Active" | "Disabled" | "Online" | "Maintenance";
@@ -28,10 +28,13 @@ export function StatusChip({ status, size = "small" }: StatusChipProps) {
     ? { bg: incidentConfiguration.background, color: incidentConfiguration.color }
     : statusColors[status] ?? { bg: "#ECEFF1", color: "#455A64" };
   const Icon = incidentConfiguration?.icon;
+  const displayLabel = incidentConfiguration
+    ? getIncidentStatusLabel(status as IncidentStatus)
+    : status;
 
   return (
     <Chip
-      label={status}
+      label={displayLabel}
       icon={Icon ? <Icon aria-hidden fontSize="small" /> : undefined}
       size={size}
       sx={{

@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
-import { AuthorizationError, requireRequestActor } from "@/lib/auth";
+import { AuthorizationError, requireIncidentPermission, requireRequestActor } from "@/lib/auth";
 import { updateIncidentWorkflowStatus } from "@/lib/nodeguardRepository";
 import type { IncidentStatus } from "@/types";
 
 type WorkflowStatus = Extract<
   IncidentStatus,
-  "Responding" | "On Scene" | "Closed"
+  "Dispatched" | "Responding" | "On Scene" | "Resolved" | "Closed"
 >;
 
 const allowedStatuses: WorkflowStatus[] = [
+  "Dispatched",
   "Responding",
   "On Scene",
+  "Resolved",
   "Closed",
 ];
 
@@ -20,6 +22,11 @@ export async function POST(request: Request) {
       "personnel",
       "admin",
       "super_admin",
+      "barangay_admin",
+      "barangay_personnel",
+      "mdrrmo_admin",
+      "mdrrmo_operations",
+      "field_responder",
     ]);
     const body = (await request.json()) as {
       incidentId?: string;
@@ -31,11 +38,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    await requireIncidentPermission(actor, body.incidentId, "status");
 
     const result = await updateIncidentWorkflowStatus(
       body.incidentId,
       body.status,
-      actor.demo ? undefined : actor.id,
+      actor.id,
+      actor.name,
     );
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   } catch (error) {

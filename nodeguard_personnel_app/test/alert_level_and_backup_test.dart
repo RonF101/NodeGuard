@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nodeguard_personnel_app/models/alert_level.dart';
 import 'package:nodeguard_personnel_app/models/backup_request.dart';
 import 'package:nodeguard_personnel_app/models/incident.dart';
+import 'package:nodeguard_personnel_app/models/response_resource.dart';
 import 'package:nodeguard_personnel_app/widgets/alert_level_update_sheet.dart';
 import 'package:nodeguard_personnel_app/widgets/request_backup_sheet.dart';
 import 'package:nodeguard_personnel_app/widgets/status_update_sheet.dart';
@@ -53,23 +54,78 @@ BackupRequest _backup(String id, DateTime requestedAt) {
 }
 
 void main() {
+  test('manual assignments do not require an IoT node or media evidence', () {
+    final incident = Incident(
+      id: 'NG-MDR-MANUAL',
+      category: IncidentCategory.medical,
+      locationName: 'Km. 5 junction',
+      approximateAddress: 'Public market entrance',
+      timestamp: DateTime(2026, 7, 21, 10),
+      alertLevel: IncidentAlertLevel.high,
+      status: IncidentStatus.assigned,
+      voiceContextAvailable: false,
+      voiceDuration: '00:00',
+      assignedUnit: 'MDRRMO Rescue Unit',
+      assignedResponder: 'Ronie Delos Santos',
+      description: 'Emergency hotline report',
+      coordinates: 'Coordinates pending validation',
+      notes: const [],
+      buzzerActive: false,
+      buzzerUpdatedAt: null,
+      sourceType: 'Manual Entry',
+      reportingChannel: 'Emergency Hotline',
+    );
+
+    expect(incident.deviceId, isNull);
+    expect(incident.isIotGenerated, isFalse);
+    expect(incident.reportingChannel, 'Emergency Hotline');
+  });
+
   test('responder workflow only offers valid next response steps', () {
     expect(
       responderStatusTransitions(IncidentStatus.assigned),
-      [IncidentStatus.enRoute],
+      [IncidentStatus.enRoute, IncidentStatus.unableToRespond],
     );
     expect(
       responderStatusTransitions(IncidentStatus.enRoute),
-      [IncidentStatus.onScene],
+      [IncidentStatus.onScene, IncidentStatus.unableToRespond],
     );
     expect(
       responderStatusTransitions(IncidentStatus.onScene),
-      [IncidentStatus.responding, IncidentStatus.resolved],
+      [
+        IncidentStatus.responding,
+        IncidentStatus.resolved,
+        IncidentStatus.unableToRespond,
+      ],
     );
     expect(
       responderStatusTransitions(IncidentStatus.resolved),
       isEmpty,
     );
+    expect(
+      responderStatusTransitions(IncidentStatus.unableToRespond),
+      isEmpty,
+    );
+  });
+
+  test('incident preserves live assigned response resources', () {
+    const resource = ResponseResource(
+      id: 'AMB-001',
+      type: 'Ambulance',
+      unitName: 'Ambulance 01',
+      agency: 'MDRRMO',
+      status: ResourceAvailability.dispatched,
+      baseLocation: 'MDRRMO Office',
+      notes: 'Basic life support unit',
+    );
+    final incident = _incident(
+      'NG-RESOURCE',
+      IncidentAlertLevel.high,
+      DateTime(2026, 7, 17, 10),
+    ).copyWith(assignedResources: const [resource]);
+
+    expect(incident.assignedResources.single.id, 'AMB-001');
+    expect(incident.assignedResources.single.status.label, 'Assigned');
   });
 
   group('shared alert-level rules', () {

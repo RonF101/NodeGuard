@@ -1,11 +1,16 @@
 "use client";
 
+import { useState } from "react";
+import Link from "next/link";
 import Image from "next/image";
 import AppBar from "@mui/material/AppBar";
+import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import IconButton from "@mui/material/IconButton";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
 import Toolbar from "@mui/material/Toolbar";
@@ -13,22 +18,27 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import CloudDoneOutlinedIcon from "@mui/icons-material/CloudDoneOutlined";
 import CloudOffOutlinedIcon from "@mui/icons-material/CloudOffOutlined";
+import AccountCircleOutlinedIcon from "@mui/icons-material/AccountCircleOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
 import MenuIcon from "@mui/icons-material/Menu";
-import NetworkCheckOutlinedIcon from "@mui/icons-material/NetworkCheckOutlined";
+import NotificationsOutlinedIcon from "@mui/icons-material/NotificationsOutlined";
 import SensorsOutlinedIcon from "@mui/icons-material/SensorsOutlined";
 import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
-import { mdrrmoPalette } from "@/theme/theme";
+import { nodeGuardRoleColors } from "@/theme/theme";
 
 type HeaderProps = {
   onMenuClick: () => void;
   operatorName: string;
   roleLabel: string;
+  dashboardTitle: string;
+  organizationName: string;
   onLogout?: () => void;
   publicDemo?: boolean;
   systemHealthy: boolean;
   lastSynced: Date | null;
   nodeHealth: { online: number; total: number };
+  environment: "barangay" | "mdrrmo";
+  attentionCount: number;
 };
 
 export const appHeaderHeight = 64;
@@ -46,24 +56,31 @@ export function Header({
   onMenuClick,
   operatorName,
   roleLabel,
+  dashboardTitle,
+  organizationName,
   onLogout,
   publicDemo = false,
   systemHealthy,
   lastSynced,
   nodeHealth,
+  environment,
+  attentionCount,
 }: HeaderProps) {
   const { online, manualLowBandwidth, setManualLowBandwidth } = useConnectivity();
+  const [profileAnchor, setProfileAnchor] = useState<HTMLElement | null>(null);
   const connected = online && systemHealthy;
   const nodeLabel = `${nodeHealth.online} of ${nodeHealth.total} nodes online`;
   const lowBandwidthHelp = "Low-bandwidth mode reduces automatic refresh frequency, disables map animations, and minimizes heavy visual content.";
+  const roleColors = nodeGuardRoleColors[environment];
+  const notificationsHref = environment === "barangay" ? "/barangay/notifications" : "/mdrrmo/escalated-incidents";
 
   return (
     <AppBar
       position="fixed"
       elevation={0}
       sx={{
-        bgcolor: mdrrmoPalette.setBlueDark,
-        borderBottom: `3px solid ${mdrrmoPalette.setBlue}`,
+        bgcolor: roleColors.dark,
+        borderBottom: `3px solid ${roleColors.primary}`,
         zIndex: (theme) => theme.zIndex.drawer + 1,
       }}
     >
@@ -75,12 +92,12 @@ export function Header({
           <Image src="/mdrrmc-logo.png" alt="La Trinidad MDRRMC logo" fill sizes="40px" style={{ objectFit: "contain" }} priority />
         </Box>
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography variant="h6" noWrap sx={{ display: { xs: "none", md: "block" } }}>NodeGuard Emergency Operations</Typography>
+          <Typography variant="h6" noWrap sx={{ display: { xs: "none", md: "block" } }}>{dashboardTitle}</Typography>
           <Typography variant="subtitle1" noWrap sx={{ display: { xs: "block", md: "none" }, fontWeight: 900 }}>NodeGuard</Typography>
           <Typography variant="caption" noWrap sx={{ display: { xs: "block", md: "none" }, color: "rgba(255,255,255,0.78)" }}>
             {connected ? "Connected" : "Disconnected"} · {nodeHealth.online}/{nodeHealth.total} nodes
           </Typography>
-          <Typography variant="caption" noWrap sx={{ display: { xs: "none", md: "block" }, color: "rgba(255,255,255,0.78)" }}>La Trinidad MDRRMO</Typography>
+          <Typography variant="caption" noWrap sx={{ display: { xs: "none", md: "block" }, color: "rgba(255,255,255,0.78)" }}>{organizationName} · {roleLabel}</Typography>
         </Box>
 
         <Stack direction="row" spacing={1.25} sx={{ display: { xs: "none", lg: "flex" }, alignItems: "center" }}>
@@ -104,32 +121,32 @@ export function Header({
           </Tooltip>
         </Stack>
 
-        <Tooltip title={lowBandwidthHelp} arrow>
-          <FormControlLabel
-            sx={{ display: { xs: "none", sm: "flex" }, m: 0, minHeight: 48, color: "white", "& .MuiFormControlLabel-label": { display: { sm: "none", xl: "block" } } }}
-            control={<Switch size="small" checked={manualLowBandwidth} onChange={(event) => setManualLowBandwidth(event.target.checked)} slotProps={{ input: { "aria-label": "Use low-bandwidth mode" } }} />}
-            label="Low-bandwidth mode"
-          />
-        </Tooltip>
-        <Tooltip title={`${manualLowBandwidth ? "Disable" : "Enable"} low-bandwidth mode. ${lowBandwidthHelp}`} arrow>
-          <IconButton color="inherit" onClick={() => setManualLowBandwidth(!manualLowBandwidth)} sx={{ display: { xs: "inline-flex", sm: "none" } }} aria-label={`${manualLowBandwidth ? "Disable" : "Enable"} low-bandwidth mode`}>
-            <NetworkCheckOutlinedIcon color={manualLowBandwidth ? "primary" : "inherit"} />
+        <Tooltip title={`${attentionCount} notification${attentionCount === 1 ? "" : "s"} requiring attention`}>
+          <IconButton component={Link} href={notificationsHref} color="inherit" aria-label={`Open notifications. ${attentionCount} requiring attention.`}>
+            <Badge badgeContent={attentionCount} color="error" max={99}><NotificationsOutlinedIcon /></Badge>
           </IconButton>
         </Tooltip>
-        <Chip
-          label={publicDemo ? "Public Demo" : roleLabel}
-          size="small"
-          sx={{
-            display: { xs: "none", xl: "flex" },
-            bgcolor: publicDemo ? "rgba(144, 202, 249, 0.24)" : "rgba(255,255,255,0.14)",
-            color: "white",
-          }}
-        />
-        {onLogout && (
-          <Tooltip title={`Sign out ${operatorName}`}>
-            <IconButton color="inherit" onClick={onLogout} aria-label={`Sign out ${operatorName}`}><LogoutIcon /></IconButton>
-          </Tooltip>
-        )}
+        <Tooltip title={`Open profile and system menu for ${operatorName}`}>
+          <IconButton color="inherit" onClick={(event) => setProfileAnchor(event.currentTarget)} aria-label={`Open profile and system menu for ${operatorName}`} aria-haspopup="menu" aria-expanded={Boolean(profileAnchor)}>
+            <AccountCircleOutlinedIcon />
+          </IconButton>
+        </Tooltip>
+        <Menu anchorEl={profileAnchor} open={Boolean(profileAnchor)} onClose={() => setProfileAnchor(null)} slotProps={{ paper: { sx: { width: 300, maxWidth: "calc(100vw - 24px)" } } }}>
+          <Box sx={{ px: 2, py: 1 }}>
+            <Typography sx={{ fontWeight: 800 }}>{operatorName}</Typography>
+            <Typography variant="body2" color="text.secondary">{roleLabel}</Typography>
+            <Typography variant="caption" color="text.secondary">{organizationName}</Typography>
+          </Box>
+          {publicDemo && <Box sx={{ px: 2, pb: 1 }}><Chip label="Public Demo" color="info" size="small" /></Box>}
+          <MenuItem disableRipple sx={{ cursor: "default", whiteSpace: "normal" }}>
+            <FormControlLabel
+              sx={{ m: 0, width: "100%" }}
+              control={<Switch checked={manualLowBandwidth} onChange={(event) => setManualLowBandwidth(event.target.checked)} slotProps={{ input: { "aria-label": "Use low-bandwidth mode" } }} />}
+              label={<Box><Typography variant="body2" sx={{ fontWeight: 700 }}>Low-bandwidth mode</Typography><Typography variant="caption" color="text.secondary">{lowBandwidthHelp}</Typography></Box>}
+            />
+          </MenuItem>
+          {onLogout && <MenuItem onClick={() => { setProfileAnchor(null); void onLogout(); }}><LogoutIcon fontSize="small" sx={{ mr: 1.5 }} />Sign out</MenuItem>}
+        </Menu>
       </Toolbar>
     </AppBar>
   );

@@ -8,6 +8,7 @@ import PlaceIcon from "@mui/icons-material/Place";
 import ReportProblemIcon from "@mui/icons-material/ReportProblem";
 import ReviewsIcon from "@mui/icons-material/Reviews";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
@@ -45,7 +46,18 @@ import {
   matchesValidationStatus
 } from "@/data/analytics";
 import { mdrrmoPalette } from "@/theme/theme";
-import { AnalyticsIncident, EmergencyCategory, NodeAnalyticsRow, ValidationStatus } from "@/types";
+import { getValidationResultLabel } from "@/config/incidentOperations";
+import type {
+  AlertLevel,
+  AnalyticsIncident,
+  EmergencyCategory,
+  IncidentSourceType,
+  IncidentStatus,
+  NodeAnalyticsRow,
+  ReportingChannel,
+  ValidationResult,
+  ValidationStatus,
+} from "@/types";
 
 type DateRange = "Today" | "This Week" | "This Month";
 type NodeFilter = "All Nodes" | string;
@@ -167,10 +179,10 @@ function AnalyticsFilters({
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
               Date Range
             </Typography>
-            <Select fullWidth value={dateRange} onChange={(event) => onDateRange(event.target.value as DateRange)}>
+            <Select fullWidth value={dateRange} inputProps={{ "aria-label": "Date range" }} onChange={(event) => onDateRange(event.target.value as DateRange)}>
               {["Today", "This Week", "This Month"].map((item) => (
                 <MenuItem key={item} value={item}>
-                  {item}
+                  {item === "Confirmed" ? "Validated Incident" : item === "False Alarm" ? "False or Misleading Report" : item === "Pending Review" ? "Unverified Report" : item}
                 </MenuItem>
               ))}
             </Select>
@@ -182,6 +194,7 @@ function AnalyticsFilters({
             <Select
               fullWidth
               value={category}
+              inputProps={{ "aria-label": "Incident category" }}
               onChange={(event) => onCategory(event.target.value as EmergencyCategory | "All")}
             >
               {["All", "Medical Emergency", "Security/Public Safety", "Fire/Disaster Emergency"].map((item) => (
@@ -195,7 +208,7 @@ function AnalyticsFilters({
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
               Node
             </Typography>
-            <Select fullWidth value={node} onChange={(event) => onNode(event.target.value)}>
+            <Select fullWidth value={node} inputProps={{ "aria-label": "IoT node" }} onChange={(event) => onNode(event.target.value)}>
               <MenuItem value="All Nodes">All Nodes</MenuItem>
               {nodeChoices.map((option) => (
                 <MenuItem key={option.deviceId} value={option.deviceId}>
@@ -208,7 +221,7 @@ function AnalyticsFilters({
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
               Status
             </Typography>
-            <Select fullWidth value={status} onChange={(event) => onStatus(event.target.value as StatusFilter)}>
+            <Select fullWidth value={status} inputProps={{ "aria-label": "Validation status" }} onChange={(event) => onStatus(event.target.value as StatusFilter)}>
               {["All", "Confirmed", "False Alarm", "Pending Review", "Resolved"].map((item) => (
                 <MenuItem key={item} value={item}>
                   {item}
@@ -247,7 +260,7 @@ function ProneAreaCard({ row }: { row: NodeAnalyticsRow }) {
             {row.totalIncidents} alerts · {row.verified} verified · {row.falseAlarms} false
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {row.recommendation}
+            Rule-based suggestion: {row.recommendation}
           </Typography>
         </Stack>
       </CardContent>
@@ -272,9 +285,9 @@ function NodeAnalyticsTable({ rows }: { rows: NodeAnalyticsRow[] }) {
               </Stack>
               <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, mt: 1.5 }}>
                 {[
-                  ["Total", row.totalIncidents],
+                  ["Selected-period incidents", row.totalIncidents],
                   ["Confirmed", row.verified],
-                  ["False Alarms", row.falseAlarms],
+                  ["False or Misleading Reports", row.falseAlarms],
                   ["Pending", row.pending],
                   ["Medical", row.medical],
                   ["Security", row.security],
@@ -297,12 +310,12 @@ function NodeAnalyticsTable({ rows }: { rows: NodeAnalyticsRow[] }) {
           <TableRow>
             <TableCell>Device ID</TableCell>
             <TableCell>Location</TableCell>
-            <TableCell>Total Incidents</TableCell>
+            <TableCell>Incidents in Selected Period</TableCell>
             <TableCell>Medical</TableCell>
             <TableCell>Security/Public Safety</TableCell>
             <TableCell>Fire/Disaster</TableCell>
             <TableCell>Confirmed</TableCell>
-            <TableCell>False Alarms</TableCell>
+            <TableCell>False or Misleading Reports</TableCell>
             <TableCell>Pending Review</TableCell>
             <TableCell>Risk Level</TableCell>
             <TableCell>Recommendation</TableCell>
@@ -348,13 +361,29 @@ export function AnalyticsCharts({
   const [category, setCategory] = useState<EmergencyCategory | "All">("All");
   const [node, setNode] = useState<NodeFilter>("All Nodes");
   const [status, setStatus] = useState<StatusFilter>("All");
+  const [barangay, setBarangay] = useState("All");
+  const [severity, setSeverity] = useState<AlertLevel | "All">("All");
+  const [channel, setChannel] = useState<ReportingChannel | "All">("All");
+  const [source, setSource] = useState<IncidentSourceType | "All">("All");
+  const [incidentStatus, setIncidentStatus] = useState<IncidentStatus | "All">("All");
+  const [incidentSubtype, setIncidentSubtype] = useState("All");
+  const [validationResult, setValidationResult] = useState<ValidationResult | "All">("All");
 
   const nodeChoices = useMemo(
     () => Array.from(
-      new Map(incidents.map((incident) => [incident.deviceId, { deviceId: incident.deviceId, location: incident.nodeLocation }])).values(),
+      new Map<string, { deviceId: string; location: string }>(
+        incidents.flatMap((incident) => incident.deviceId
+          ? [[incident.deviceId, { deviceId: incident.deviceId, location: incident.nodeLocation ?? incident.deviceId }] as const]
+          : []),
+      ).values(),
     ).sort((a, b) => a.deviceId.localeCompare(b.deviceId)),
     [incidents],
   );
+  const barangayChoices = useMemo(() => Array.from(new Set(incidents.map((incident) => incident.barangayName).filter(Boolean) as string[])).toSorted(), [incidents]);
+  const channelChoices = useMemo(() => Array.from(new Set(incidents.map((incident) => incident.reportingChannel).filter(Boolean) as ReportingChannel[])).toSorted(), [incidents]);
+  const subtypeChoices = useMemo(() => Array.from(new Set(incidents.map((incident) => incident.incidentSubtype).filter(Boolean) as string[])).toSorted(), [incidents]);
+  const validationChoices = useMemo(() => Array.from(new Set(incidents.map((incident) => incident.validationResult).filter(Boolean) as ValidationResult[])).toSorted(), [incidents]);
+  const incidentStatusChoices = useMemo(() => Array.from(new Set(incidents.map((incident) => incident.status))).toSorted(), [incidents]);
   const referenceDate = useMemo(() => {
     if (!useLatestRecordAsReference) return new Date();
     const latest = incidents.reduce((maximum, incident) => {
@@ -370,16 +399,18 @@ export function AnalyticsCharts({
         .filter((incident) => isWithinRange(incident.timestamp, dateRange, referenceDate))
         .filter((incident) => category === "All" || incident.category === category)
         .filter((incident) => node === "All Nodes" || incident.deviceId === node)
-        .filter((incident) => matchesValidationStatus(incident, status)),
-    [category, dateRange, incidents, node, referenceDate, status]
+        .filter((incident) => matchesValidationStatus(incident, status))
+        .filter((incident) => barangay === "All" || incident.barangayName === barangay)
+        .filter((incident) => severity === "All" || incident.priority === severity)
+        .filter((incident) => channel === "All" || incident.reportingChannel === channel)
+        .filter((incident) => source === "All" || incident.sourceType === source)
+        .filter((incident) => incidentStatus === "All" || incident.status === incidentStatus)
+        .filter((incident) => incidentSubtype === "All" || incident.incidentSubtype === incidentSubtype)
+        .filter((incident) => validationResult === "All" || incident.validationResult === validationResult),
+    [barangay, category, channel, dateRange, incidentStatus, incidentSubtype, incidents, node, referenceDate, severity, source, status, validationResult]
   );
 
-  const weeklyIncidents = useMemo(
-    () => incidents.filter((incident) => isWithinRange(incident.timestamp, "This Week", referenceDate)),
-    [incidents, referenceDate],
-  );
   const nodeRows = useMemo(() => buildNodeAnalytics(filteredIncidents, nodeChoices), [filteredIncidents, nodeChoices]);
-  const weeklyRows = useMemo(() => buildNodeAnalytics(weeklyIncidents, nodeChoices), [weeklyIncidents, nodeChoices]);
   const activeRows = nodeRows.filter((row) => row.totalIncidents > 0);
 
   const categoryCounts = countCategories(filteredIncidents);
@@ -389,7 +420,7 @@ export function AnalyticsCharts({
     location: row.location,
     incidents: row.totalIncidents
   }));
-  const validationByDevice = weeklyRows.map((row) => ({
+  const validationByDevice = nodeRows.map((row) => ({
     deviceId: row.deviceId.replace("LT-NODE-", "Node "),
     verified: row.verified,
     falseAlarms: row.falseAlarms,
@@ -401,13 +432,68 @@ export function AnalyticsCharts({
     security: row.security,
     fireDisaster: row.fireDisaster
   }));
+  const countBy = (key: (incident: AnalyticsIncident) => string) => Object.entries(
+    filteredIncidents.reduce<Record<string, number>>((totals, incident) => {
+      const label = key(incident);
+      totals[label] = (totals[label] ?? 0) + 1;
+      return totals;
+    }, {}),
+  ).map(([name, value]) => ({ name, value })).toSorted((a, b) => b.value - a.value);
+  const incidentsByStatus = countBy((incident) => incident.status);
+  const incidentsByChannel = countBy((incident) => incident.reportingChannel ?? "Not recorded");
+  const incidentsByBarangay = countBy((incident) => incident.barangayName ?? "Municipal / unassigned");
+  const incidentsBySeverity = countBy((incident) => incident.priority);
+  const incidentsByDetailedType = countBy((incident) => incident.incidentSubtype ?? "Not recorded");
+  const validationClassifications = countBy((incident) => incident.validationResult
+    ? getValidationResultLabel(incident.validationResult)
+    : incident.validationStatus === "Confirmed"
+      ? "Validated Incident"
+      : incident.validationStatus === "False Alarm"
+        ? "False or Misleading Report"
+        : "Unverified Report");
+  const locationConcentration = countBy((incident) => incident.location ?? incident.nodeLocation ?? "Location not recorded");
+  const escalationPatterns = countBy((incident) => incident.escalationStatus ?? "Not Escalated");
+  const responseActivity = Object.entries(filteredIncidents.reduce<Record<string, number>>((totals, incident) => {
+    if (["Assigned", "Dispatched", "Responding", "On Scene", "Resolved", "Closed"].includes(incident.status)) {
+      totals[incident.status] = (totals[incident.status] ?? 0) + 1;
+    }
+    return totals;
+  }, {})).map(([name, value]) => ({ name, value }));
+  const responderActivity = Object.entries(filteredIncidents.reduce<Record<string, number>>((totals, incident) => {
+    if (incident.assignedResponder && incident.assignedResponder !== "Unassigned") {
+      totals[incident.assignedResponder] = (totals[incident.assignedResponder] ?? 0) + 1;
+    }
+    return totals;
+  }, {})).map(([name, value]) => ({ name, value })).toSorted((a, b) => b.value - a.value);
+  const resourceUtilization = Object.entries(filteredIncidents.flatMap((incident) => incident.assignedResources ?? []).reduce<Record<string, number>>((totals, resource) => {
+    totals[resource.unitName] = (totals[resource.unitName] ?? 0) + 1;
+    return totals;
+  }, {})).map(([name, value]) => ({ name, value })).toSorted((a, b) => b.value - a.value);
+  const iotActivations = Object.entries(filteredIncidents.filter((incident) => incident.sourceType === "IoT Node").reduce<Record<string, number>>((totals, incident) => {
+    const label = incident.deviceId ?? "Node ID not recorded";
+    totals[label] = (totals[label] ?? 0) + 1;
+    return totals;
+  }, {})).map(([name, value]) => ({ name, value })).toSorted((a, b) => b.value - a.value);
+  const incidentTrend = Object.entries(filteredIncidents.reduce<Record<string, number>>((totals, incident) => {
+    const day = incident.timestamp.slice(0, 10);
+    totals[day] = (totals[day] ?? 0) + 1;
+    return totals;
+  }, {})).toSorted(([left], [right]) => left.localeCompare(right)).map(([name, value]) => ({ name, value }));
+  const incidentTimeOfDay = Object.entries(filteredIncidents.reduce<Record<string, number>>((totals, incident) => {
+    const date = new Date(incident.timestamp.replace(" ", "T"));
+    const label = Number.isNaN(date.getTime())
+      ? "Time not recorded"
+      : new Intl.DateTimeFormat("en-PH", { hour: "2-digit", hourCycle: "h23", timeZone: "Asia/Manila" }).format(date);
+    totals[label] = (totals[label] ?? 0) + 1;
+    return totals;
+  }, {})).toSorted(([left], [right]) => left.localeCompare(right)).map(([name, value]) => ({ name, value }));
 
-  const totalThisWeek = weeklyIncidents.length;
-  const verifiedThisWeek = weeklyIncidents.filter((incident) => incident.validationStatus === "Confirmed").length;
-  const falseThisWeek = weeklyIncidents.filter((incident) => incident.validationStatus === "False Alarm").length;
-  const pendingThisWeek = weeklyIncidents.filter((incident) => incident.validationStatus === "Pending Review").length;
-  const mostActiveNode = weeklyRows.toSorted((a, b) => b.totalIncidents - a.totalIncidents)[0];
-  const highestRisk = weeklyRows.toSorted((a, b) => {
+  const totalFiltered = filteredIncidents.length;
+  const confirmedFiltered = filteredIncidents.filter((incident) => incident.validationStatus === "Confirmed").length;
+  const falseFiltered = filteredIncidents.filter((incident) => incident.validationStatus === "False Alarm").length;
+  const pendingFiltered = filteredIncidents.filter((incident) => incident.validationStatus === "Pending Review").length;
+  const mostActiveNode = nodeRows.toSorted((a, b) => b.totalIncidents - a.totalIncidents)[0];
+  const highestRisk = nodeRows.toSorted((a, b) => {
     const score = { "High Risk": 4, "Review Needed": 3, "Moderate Risk": 2, "Low Risk": 1 };
     return score[b.riskLevel] - score[a.riskLevel] || b.totalIncidents - a.totalIncidents;
   })[0];
@@ -417,9 +503,9 @@ export function AnalyticsCharts({
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
           <AnalyticsSummaryCard
-            label="Total Alerts This Week"
-            value={totalThisWeek}
-            helper="All NodeGuard activations"
+            label="Matching Incidents"
+            value={totalFiltered}
+            helper="Manual reports and node activations"
             icon={<AnalyticsIcon />}
             tone={mdrrmoPalette.orange}
           />
@@ -427,7 +513,7 @@ export function AnalyticsCharts({
         <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
           <AnalyticsSummaryCard
             label="Confirmed Alerts"
-            value={verifiedThisWeek}
+            value={confirmedFiltered}
             helper="Confirmed emergency activity"
             icon={<FactCheckIcon />}
             tone={mdrrmoPalette.successGreen}
@@ -435,8 +521,8 @@ export function AnalyticsCharts({
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
           <AnalyticsSummaryCard
-            label="False Alarms"
-            value={falseThisWeek}
+            label="False or Misleading Reports"
+            value={falseFiltered}
             helper="Non-emergency activations"
             icon={<ReportProblemIcon />}
             tone={mdrrmoPalette.muted}
@@ -445,7 +531,7 @@ export function AnalyticsCharts({
         <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
           <AnalyticsSummaryCard
             label="Pending Review"
-            value={pendingThisWeek}
+            value={pendingFiltered}
             helper="Needs personnel review"
             icon={<ReviewsIcon />}
             tone={mdrrmoPalette.setBlueDark}
@@ -483,6 +569,23 @@ export function AnalyticsCharts({
         nodeChoices={nodeChoices}
       />
 
+      <Card>
+        <CardContent>
+          <Typography variant="subtitle2" color="secondary" sx={{ mb: 1.5, fontWeight: 900 }}>Operational record filters</Typography>
+          <Grid container spacing={1.5}>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Select fullWidth value={barangay} inputProps={{ "aria-label": "Barangay" }} onChange={(event) => setBarangay(event.target.value)} displayEmpty><MenuItem value="All">All barangays</MenuItem>{barangayChoices.map((item) => <MenuItem key={item} value={item}>Barangay {item}</MenuItem>)}</Select></Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Select fullWidth value={severity} inputProps={{ "aria-label": "Severity" }} onChange={(event) => setSeverity(event.target.value as AlertLevel | "All")} displayEmpty><MenuItem value="All">All severities</MenuItem>{["Unassessed", "Critical", "High", "Moderate", "Low"].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</Select></Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Select fullWidth value={channel} inputProps={{ "aria-label": "Reporting channel" }} onChange={(event) => setChannel(event.target.value as ReportingChannel | "All")} displayEmpty><MenuItem value="All">All reporting channels</MenuItem>{channelChoices.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</Select></Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Select fullWidth value={source} inputProps={{ "aria-label": "Incident source" }} onChange={(event) => setSource(event.target.value as IncidentSourceType | "All")} displayEmpty><MenuItem value="All">All incident sources</MenuItem><MenuItem value="Manual Entry">Manual Entry</MenuItem><MenuItem value="IoT Node">IoT Node</MenuItem></Select></Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Select fullWidth value={incidentStatus} inputProps={{ "aria-label": "Workflow status" }} onChange={(event) => setIncidentStatus(event.target.value as IncidentStatus | "All")} displayEmpty><MenuItem value="All">All workflow statuses</MenuItem>{incidentStatusChoices.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</Select></Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Select fullWidth value={incidentSubtype} inputProps={{ "aria-label": "Detailed incident type" }} onChange={(event) => setIncidentSubtype(event.target.value)} displayEmpty><MenuItem value="All">All detailed types</MenuItem>{subtypeChoices.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</Select></Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Select fullWidth value={validationResult} inputProps={{ "aria-label": "Validation classification" }} onChange={(event) => setValidationResult(event.target.value as ValidationResult | "All")} displayEmpty><MenuItem value="All">All classifications</MenuItem>{validationChoices.map((item) => <MenuItem key={item} value={item}>{getValidationResultLabel(item)}</MenuItem>)}</Select></Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Button fullWidth variant="outlined" onClick={() => { setBarangay("All"); setSeverity("All"); setChannel("All"); setSource("All"); setIncidentStatus("All"); setIncidentSubtype("All"); setValidationResult("All"); }}>Clear operational filters</Button></Grid>
+          </Grid>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>{filteredIncidents.length} record{filteredIncidents.length === 1 ? "" : "s"} match all selected filters.</Typography>
+        </CardContent>
+      </Card>
+
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 6 }}>
           <ChartCard title="Incidents by Category">
@@ -513,7 +616,7 @@ export function AnalyticsCharts({
           </ChartCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
-          <ChartCard title="False vs Confirmed Alarms per Device This Week">
+          <ChartCard title="False vs Confirmed Alarms per Device">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={validationByDevice}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -521,9 +624,9 @@ export function AnalyticsCharts({
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="verified" name="Confirmed" fill={mdrrmoPalette.successGreen} radius={[5, 5, 0, 0]} isAnimationActive={false} />
-                <Bar dataKey="falseAlarms" name="False Alarm" fill={mdrrmoPalette.muted} radius={[5, 5, 0, 0]} isAnimationActive={false} />
-                <Bar dataKey="pending" name="Pending" fill={mdrrmoPalette.setBlueDark} radius={[5, 5, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="verified" name="Validated Incident" fill={mdrrmoPalette.successGreen} radius={[5, 5, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="falseAlarms" name="False or Misleading Report" fill={mdrrmoPalette.muted} radius={[5, 5, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="pending" name="Unverified Report" fill={mdrrmoPalette.setBlueDark} radius={[5, 5, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -546,9 +649,45 @@ export function AnalyticsCharts({
         </Grid>
       </Grid>
 
+      <Grid container spacing={3}>
+        {[
+          ["Incidents by Workflow Status", incidentsByStatus, mdrrmoPalette.setBlue],
+          ["Incidents by Barangay", incidentsByBarangay, mdrrmoPalette.darkGreen],
+          ["Incidents by Reporting Channel", incidentsByChannel, mdrrmoPalette.orange],
+          ["Incidents by Severity", incidentsBySeverity, "#C65A12"],
+          ["Incidents by Detailed Type", incidentsByDetailedType, "#5B6B7A"],
+          ["Validation Classifications", validationClassifications, mdrrmoPalette.successGreen],
+          ["Incident Trend by Date", incidentTrend, mdrrmoPalette.setBlue],
+          ["Incident Activity by Hour (PHT)", incidentTimeOfDay, mdrrmoPalette.navy],
+          ["Hotspot / Location Concentration", locationConcentration, "#C65A12"],
+          ["Escalation Patterns", escalationPatterns, "#B26A00"],
+          ["Response Activity", responseActivity, mdrrmoPalette.darkGreen],
+          ["Responder Activity", responderActivity, mdrrmoPalette.setBlueDark],
+          ["Assigned Resource Utilization", resourceUtilization, "#6A4C93"],
+          ["IoT-Node Activations", iotActivations, "#187A8C"],
+        ].map(([title, data, color]) => (
+          <Grid key={title as string} size={{ xs: 12, lg: 6 }}>
+            <ChartCard title={title as string}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data as Array<{ name: string; value: number }>} margin={{ left: 8, right: 8, bottom: compactCharts ? 48 : 64 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" interval={0} angle={-24} textAnchor="end" height={compactCharts ? 84 : 96} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="value" name="Incidents" fill={color as string} radius={[5, 5, 0, 0]} isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </Grid>
+        ))}
+      </Grid>
+
       <Box>
         <Typography variant="h5" color="secondary" sx={{ mb: 2 }}>
-          Prone Area Insights
+          Rule-Based Decision Support Suggestions
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          These descriptive suggestions are derived from stored incident counts and validation patterns. They do not predict disasters or replace authorized personnel decisions.
         </Typography>
         <Grid container spacing={3}>
           {(activeRows.length ? activeRows : nodeRows).map((row) => (

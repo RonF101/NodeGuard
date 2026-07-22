@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { validateIncident } from "@/lib/nodeguardRepository";
-import { AuthorizationError, requireRequestActor } from "@/lib/auth";
+import { AuthorizationError, requireIncidentPermission, requireRequestActor } from "@/lib/auth";
 import { ValidationStatus } from "@/types";
 
 const allowedStatuses: ValidationStatus[] = [
@@ -11,11 +11,7 @@ const allowedStatuses: ValidationStatus[] = [
 
 export async function POST(request: Request) {
   try {
-    const actor = await requireRequestActor(request, [
-      "personnel",
-      "admin",
-      "super_admin",
-    ]);
+    const actor = await requireRequestActor(request, ["barangay_admin", "barangay_personnel"]);
     const body = (await request.json()) as {
       incidentId?: string;
       validationStatus?: ValidationStatus;
@@ -30,11 +26,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    await requireIncidentPermission(actor, body.incidentId, "validate");
 
     const result = await validateIncident(
       body.incidentId,
       body.validationStatus,
-      actor.demo ? undefined : actor.id,
+      actor.id,
+      actor.name,
     );
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   } catch (error) {

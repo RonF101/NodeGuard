@@ -8,7 +8,9 @@ import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Divider from "@mui/material/Divider";
 import Grid from "@mui/material/Grid";
+import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { deviceNodes as deviceSeed } from "@/data/devices";
 import { incidents as incidentSeed } from "@/data/incidents";
@@ -23,6 +25,7 @@ import MapIcon from "@mui/icons-material/Map";
 import LayersOutlinedIcon from "@mui/icons-material/LayersOutlined";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { useConnectivity } from "@/components/connectivity/ConnectivityProvider";
+import { getValidationResultLabel } from "@/config/incidentOperations";
 
 const categoryColors: Record<EmergencyCategory, string> = {
   "Medical Emergency": mdrrmoPalette.setBlue,
@@ -40,13 +43,37 @@ function getNodeColor(incident?: Incident) {
   return categoryColors[incident.category];
 }
 
-export function MapPanel() {
+export function MapPanel({ environment = "mdrrmo" }: { environment?: "barangay" | "mdrrmo" }) {
   const { online, lowBandwidth } = useConnectivity();
-  const [deviceNodes, setDeviceNodes] = useState<DeviceNode[]>(isSupabaseConfigured() ? [] : deviceSeed);
-  const [incidents, setIncidents] = useState<Incident[]>(isSupabaseConfigured() ? [] : incidentSeed);
-  const [selectedId, setSelectedId] = useState(isSupabaseConfigured() ? "" : deviceSeed[0].id);
+  const demoNodes = environment === "barangay" ? deviceSeed.filter((item) => item.barangayId === "brgy-pico") : deviceSeed;
+  const demoIncidents = environment === "barangay" ? incidentSeed.filter((item) => item.barangayId === "brgy-pico") : incidentSeed;
+  const [deviceNodes, setDeviceNodes] = useState<DeviceNode[]>(isSupabaseConfigured() ? [] : demoNodes);
+  const [incidents, setIncidents] = useState<Incident[]>(isSupabaseConfigured() ? [] : demoIncidents);
+  const [selectedId, setSelectedId] = useState(isSupabaseConfigured() ? "" : demoNodes[0]?.id ?? "");
   const [loadError, setLoadError] = useState<string | null>(null);
-  const selectedNode = deviceNodes.find((node) => node.id === selectedId) ?? deviceNodes[0];
+  const [barangayFilter, setBarangayFilter] = useState("All");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [validationFilter, setValidationFilter] = useState("All");
+  const [escalationFilter, setEscalationFilter] = useState("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const barangays = useMemo(() => Array.from(new Set(deviceNodes.map((node) => node.barangayName).filter(Boolean) as string[])).toSorted(), [deviceNodes]);
+  const manualLocations = useMemo(
+    () => incidents.filter((item) => item.sourceType === "Manual Entry"),
+    [incidents],
+  );
+  const visibleNodes = useMemo(() => deviceNodes.filter((node) => {
+    const nodeIncident = incidents.find((item) => item.id === node.assignedIncidentId) ?? incidents.find((item) => item.deviceId === node.id);
+    return (barangayFilter === "All" || node.barangayName === barangayFilter) &&
+      (categoryFilter === "All" || nodeIncident?.category === categoryFilter) &&
+      (statusFilter === "All" || nodeIncident?.status === statusFilter) &&
+      (validationFilter === "All" || nodeIncident?.validationResult === validationFilter) &&
+      (escalationFilter === "All" || (escalationFilter === "Escalated" ? nodeIncident?.escalationStatus && nodeIncident.escalationStatus !== "Not Escalated" : !nodeIncident?.escalationStatus || nodeIncident.escalationStatus === "Not Escalated")) &&
+      (!dateFrom || !nodeIncident || nodeIncident.timestamp.slice(0, 10) >= dateFrom) &&
+      (!dateTo || !nodeIncident || nodeIncident.timestamp.slice(0, 10) <= dateTo);
+  }), [barangayFilter, categoryFilter, dateFrom, dateTo, deviceNodes, escalationFilter, incidents, statusFilter, validationFilter]);
+  const selectedNode = visibleNodes.find((node) => node.id === selectedId) ?? visibleNodes[0] ?? deviceNodes[0];
 
   const loadMapData = useCallback(async () => {
     try {
@@ -54,16 +81,18 @@ export function MapPanel() {
         fetchDeviceNodes(),
         fetchIncidents(),
       ]);
-      setDeviceNodes(nextNodes);
-      setIncidents(nextIncidents);
+      const visibleNodes = environment === "barangay" ? nextNodes.filter((item) => item.barangayId === "brgy-pico") : nextNodes;
+      const visibleIncidents = environment === "barangay" ? nextIncidents.filter((item) => item.barangayId === "brgy-pico") : nextIncidents;
+      setDeviceNodes(visibleNodes);
+      setIncidents(visibleIncidents);
       setLoadError(null);
-      if (nextNodes.length && !nextNodes.some((node) => node.id === selectedId)) {
-        setSelectedId(nextNodes[0].id);
+      if (visibleNodes.length && !visibleNodes.some((node) => node.id === selectedId)) {
+        setSelectedId(visibleNodes[0].id);
       }
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load the device map.");
     }
-  }, [selectedId]);
+  }, [environment, selectedId]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void loadMapData(), 0);
@@ -104,12 +133,33 @@ export function MapPanel() {
   return (
     <Stack spacing={2}>
       {loadError && <Alert severity="error">{loadError}</Alert>}
+      <Card><CardContent><Grid container spacing={1.5}>
+        {environment === "mdrrmo" && <Grid size={{ xs: 12, sm: 6, lg: 3 }}><TextField select fullWidth label="Barangay" value={barangayFilter} onChange={(event) => setBarangayFilter(event.target.value)}><MenuItem value="All">All barangays</MenuItem>{barangays.map((item) => <MenuItem key={item} value={item}>Barangay {item}</MenuItem>)}</TextField></Grid>}
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}><TextField select fullWidth label="Incident category" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><MenuItem value="All">All categories</MenuItem>{Object.keys(categoryColors).map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</TextField></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}><TextField select fullWidth label="Incident status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><MenuItem value="All">All statuses</MenuItem>{Array.from(new Set(incidents.map((item) => item.status))).map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</TextField></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}><TextField select fullWidth label="Validation classification" value={validationFilter} onChange={(event) => setValidationFilter(event.target.value)}><MenuItem value="All">All validation classifications</MenuItem>{Array.from(new Set(incidents.map((item) => item.validationResult).filter(Boolean))).map((item) => <MenuItem key={item} value={item}>{getValidationResultLabel(item!)}</MenuItem>)}</TextField></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}><TextField select fullWidth label="Escalation" value={escalationFilter} onChange={(event) => setEscalationFilter(event.target.value)}><MenuItem value="All">All escalation states</MenuItem><MenuItem value="Escalated">Escalated</MenuItem><MenuItem value="Local">Locally handled</MenuItem></TextField></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}><TextField fullWidth type="date" label="Date from" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}><TextField fullWidth type="date" label="Date to" value={dateTo} onChange={(event) => setDateTo(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Button fullWidth variant="outlined" onClick={() => { setBarangayFilter("All"); setCategoryFilter("All"); setStatusFilter("All"); setValidationFilter("All"); setEscalationFilter("All"); setDateFrom(""); setDateTo(""); }}>Clear Filters</Button></Grid>
+      </Grid></CardContent></Card>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" color="secondary">Manual Report Locations</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Ordinary reports remain visible on the situation map even when they are not associated with an IoT node. Exact coordinates can be added during assessment when available.</Typography>
+          <Grid container spacing={1.25}>
+            {manualLocations.slice(0, 8).map((item) => <Grid key={item.id} size={{ xs: 12, md: 6, xl: 3 }}><Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1.5, p: 1.25, height: "100%" }}><Stack direction="row" sx={{ justifyContent: "space-between", gap: 1 }}><Typography sx={{ fontWeight: 900 }}>{item.id}</Typography><StatusChip status={item.status} /></Stack><Typography variant="body2" sx={{ mt: 0.5, fontWeight: 700 }}>{item.location}</Typography><Typography variant="caption" color="text.secondary">{item.reportingChannel ?? "Manual Entry"}{item.barangayName ? ` · Barangay ${item.barangayName}` : " · Municipal case"}</Typography></Box></Grid>)}
+            {!manualLocations.length && <Grid size={{ xs: 12 }}><Alert severity="info">No manual incident locations match the current jurisdiction.</Alert></Grid>}
+          </Grid>
+        </CardContent>
+      </Card>
+      {!visibleNodes.length && <Alert severity="info">No registered nodes match the selected incident filters. Clear filters to restore the full map.</Alert>}
       <Grid container spacing={3}>
       <Grid size={{ xs: 12, lg: 8 }}>
         <Card>
           <CardContent>
             <Typography variant="h6" color="secondary" sx={{ mb: 2 }}>
-              La Trinidad NodeGuard Device Map
+              La Trinidad Incident & Supporting IoT Node Map
             </Typography>
             {(!online || lowBandwidth) && (
               <Alert severity="info" sx={{ mb: 2 }}>
@@ -117,7 +167,7 @@ export function MapPanel() {
               </Alert>
             )}
             <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 2, flexWrap: "wrap" }}>
-              {deviceNodes.map((node) => {
+              {visibleNodes.map((node) => {
                 const nodeIncident = incidents.find((item) => item.id === node.assignedIncidentId) ??
                   incidents.find((item) => item.deviceId === node.id && !["Resolved", "Closed", "False Alert"].includes(item.status));
                 const nodeColor = getNodeColor(nodeIncident);

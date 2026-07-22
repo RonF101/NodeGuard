@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/backup_request.dart';
 import '../models/alert_level.dart';
 import '../models/incident.dart';
+import '../models/response_resource.dart';
 import '../services/nodeguard_repository.dart';
 import '../services/operational_mode_service.dart';
 import '../services/supabase_service.dart';
@@ -40,6 +42,9 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
   final _repository = const NodeGuardRepository();
   bool _isTogglingBuzzer = false;
   bool _isCancellingBackup = false;
+  bool _isAcknowledgingAssignment = false;
+  bool _isUploadingAttachment = false;
+  final _imagePicker = ImagePicker();
   RealtimeChannel? _realtimeChannel;
   late Incident _incident =
       widget.incidents.firstWhere((item) => item.id == widget.incidentId);
@@ -87,6 +92,18 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'backup_offers',
+          callback: (_) => _refreshIncident(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'resource_assignments',
+          callback: (_) => _refreshIncident(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'response_resources',
           callback: (_) => _refreshIncident(),
         )
         .subscribe();
@@ -144,7 +161,7 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Backup request sent. Eligible available personnel and MDRRMO coordination will receive the update.',
+                'Backup request sent to eligible available responders and the incident coordination desk.',
               ),
             ),
           );
@@ -207,6 +224,111 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
     }
   }
 
+  Future<void> _acknowledgeAssignment() async {
+    setState(() => _isAcknowledgingAssignment = true);
+    try {
+      await _repository.acknowledgeAssignment(_incident.id);
+      if (!mounted) return;
+      setState(() => _incident = _incident.copyWith(
+            assignmentAcknowledgedAt: DateTime.now(),
+          ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Assignment acknowledged.')),
+      );
+    } on NodeGuardDataException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isAcknowledgingAssignment = false);
+    }
+  }
+
+  Future<void> _pickAndUploadAttachment(ImageSource source) async {
+    if (!OperationalModeService.instance.online) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'A live connection is required to upload private incident evidence.'),
+        ),
+      );
+      return;
+    }
+    final selected = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 82,
+      maxWidth: 1800,
+    );
+    if (selected == null || !mounted) return;
+    setState(() => _isUploadingAttachment = true);
+    try {
+      await _repository.uploadFieldAttachment(
+        publicId: _incident.id,
+        bytes: await selected.readAsBytes(),
+        fileName: selected.name,
+        contentType: selected.mimeType ?? 'image/jpeg',
+      );
+      if (!mounted) return;
+      setState(() {
+        final history = List<String>.of(_incident.activityHistory)
+          ..insert(0, 'Field attachment uploaded by the assigned responder.');
+        _incident = _incident.copyWith(activityHistory: history);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Private field attachment uploaded.')),
+      );
+    } on NodeGuardDataException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isUploadingAttachment = false);
+    }
+  }
+
+  void _showAttachmentSource() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Add Field Attachment',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      )),
+              const SizedBox(height: 6),
+              const Text(
+                'Photos remain private and are available only to personnel authorized for this incident.',
+                style: TextStyle(color: AppColors.mutedText),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.pop(sheetContext);
+                  _pickAndUploadAttachment(ImageSource.camera);
+                },
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('Take Photo'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(sheetContext);
+                  _pickAndUploadAttachment(ImageSource.gallery);
+                },
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('Choose Existing Photo'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     final client = SupabaseService.client;
@@ -217,7 +339,7 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
   }
 
   Future<void> _showStatusSheet() async {
-    final wasCompleted = _incident.isCompleted;
+    final wasTerminal = _incident.isResponderTerminal;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -247,12 +369,14 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
         },
       ),
     );
-    if (!mounted || wasCompleted || !_incident.isCompleted) return;
+    if (!mounted || wasTerminal || !_incident.isResponderTerminal) return;
     widget.onIncidentResolved?.call();
     Navigator.of(context).pop();
   }
 
   Future<void> _toggleBuzzer() async {
+    final deviceId = _incident.deviceId;
+    if (deviceId == null) return;
     final nextActive = !_incident.buzzerActive;
     if (!OperationalModeService.instance.online) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -267,7 +391,7 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
     setState(() => _isTogglingBuzzer = true);
 
     final updated = await _repository.setDeviceBuzzer(
-      deviceId: _incident.deviceId,
+      deviceId: deviceId,
       active: nextActive,
     );
 
@@ -361,7 +485,7 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(_incident.id)),
-      bottomNavigationBar: _incident.isCompleted
+      bottomNavigationBar: _incident.isResponderTerminal
           ? null
           : SafeArea(
               top: false,
@@ -412,7 +536,11 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
             StatusChip(status: _incident.status),
           ]),
           const SizedBox(height: 12),
-          _AssignmentSummaryCard(incident: _incident),
+          _AssignmentSummaryCard(
+            incident: _incident,
+            isAcknowledging: _isAcknowledgingAssignment,
+            onAcknowledge: _acknowledgeAssignment,
+          ),
           const SizedBox(height: 12),
           Card(
             child: Padding(
@@ -440,8 +568,9 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed:
-                          _incident.isCompleted ? null : _showAlertLevelSheet,
+                      onPressed: _incident.isResponderTerminal
+                          ? null
+                          : _showAlertLevelSheet,
                       icon: const Icon(Icons.tune_outlined),
                       label: const Text('Update Alert Level'),
                     ),
@@ -451,8 +580,43 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          VoiceContextCard(incident: _incident),
-          const SizedBox(height: 12),
+          if (_incident.cameraCaptureUrl != null) ...[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Activation-Time Camera Capture',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 10),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.network(
+                        _incident.cameraCaptureUrl!,
+                        width: double.infinity,
+                        height: 220,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Padding(
+                          padding: EdgeInsets.all(18),
+                          child: Text(
+                              'The authorized camera capture is unavailable.'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_incident.voiceContextAvailable ||
+              _incident.voiceUrl != null) ...[
+            VoiceContextCard(incident: _incident),
+            const SizedBox(height: 12),
+          ],
           _BackupSection(
             incident: _incident,
             isCancelling: _isCancellingBackup,
@@ -460,86 +624,120 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
             onCancel: _cancelBackup,
           ),
           const SizedBox(height: 12),
+          _ResourcesSection(incident: _incident),
+          const SizedBox(height: 12),
           _CollapsibleSectionCard(
             title: 'Incident & Location Details',
             icon: Icons.info_outline,
             children: [
-              _DetailRow(label: 'Device ID', value: _incident.deviceId),
-              _DetailRow(label: 'Node Location', value: _incident.nodeLocation),
+              _DetailRow(label: 'Source Type', value: _incident.sourceType),
+              _DetailRow(
+                  label: 'Reporting Channel',
+                  value: _incident.reportingChannel),
+              if (_incident.reportingPersonOrSource != null)
+                _DetailRow(
+                    label: 'Reporter / Source',
+                    value: _incident.reportingPersonOrSource!),
+              if (_incident.reportingOffice != null)
+                _DetailRow(
+                    label: 'Reporting Office',
+                    value: _incident.reportingOffice!),
+              if (_incident.incidentSubtype != null)
+                _DetailRow(
+                    label: 'Incident Subtype',
+                    value: _incident.incidentSubtype!),
+              if (_incident.personsAffected != null)
+                _DetailRow(
+                    label: 'Persons Affected',
+                    value: '${_incident.personsAffected}'),
+              if (_incident.affectedPersonsCondition != null)
+                _DetailRow(
+                    label: 'Affected-person Condition',
+                    value: _incident.affectedPersonsCondition!),
+              if (_incident.deviceId != null)
+                _DetailRow(label: 'Device ID', value: _incident.deviceId!),
+              if (_incident.nodeLocation != null)
+                _DetailRow(
+                    label: 'Node Location', value: _incident.nodeLocation!),
               _DetailRow(
                   label: 'Reported',
                   value: formatDateTime(_incident.timestamp)),
               _DetailRow(label: 'Address', value: _incident.approximateAddress),
+              if (_incident.landmark != null)
+                _DetailRow(label: 'Landmark', value: _incident.landmark!),
               _DetailRow(label: 'Coordinates', value: _incident.coordinates),
             ],
           ),
-          const SizedBox(height: 12),
-          _CollapsibleSectionCard(
-            title: 'Node Buzzer',
-            icon: _incident.buzzerActive
-                ? Icons.notifications_active_outlined
-                : Icons.notifications_off_outlined,
-            initiallyExpanded: _incident.buzzerActive,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    _incident.buzzerActive
-                        ? Icons.notifications_active_outlined
-                        : Icons.notifications_off_outlined,
-                    color: _incident.buzzerActive
-                        ? AppColors.goRed
-                        : AppColors.mutedText,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _incident.buzzerActive
-                              ? 'Buzzer active on ${_incident.deviceId}'
-                              : 'Buzzer inactive on ${_incident.deviceId}',
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        if (_incident.buzzerUpdatedAt != null)
+          if (_incident.isIotGenerated) ...[
+            const SizedBox(height: 12),
+            _CollapsibleSectionCard(
+              title: 'Node Buzzer',
+              icon: _incident.buzzerActive
+                  ? Icons.notifications_active_outlined
+                  : Icons.notifications_off_outlined,
+              initiallyExpanded: _incident.buzzerActive,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      _incident.buzzerActive
+                          ? Icons.notifications_active_outlined
+                          : Icons.notifications_off_outlined,
+                      color: _incident.buzzerActive
+                          ? AppColors.goRed
+                          : AppColors.mutedText,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            'Last command: ${formatDateTime(_incident.buzzerUpdatedAt!)}',
-                            style: const TextStyle(
-                              color: AppColors.mutedText,
-                              fontWeight: FontWeight.w700,
-                            ),
+                            _incident.buzzerActive
+                                ? 'Buzzer active on ${_incident.deviceId}'
+                                : 'Buzzer inactive on ${_incident.deviceId}',
+                            style: const TextStyle(fontWeight: FontWeight.w900),
                           ),
-                      ],
+                          if (_incident.buzzerUpdatedAt != null)
+                            Text(
+                              'Last command: ${formatDateTime(_incident.buzzerUpdatedAt!)}',
+                              style: const TextStyle(
+                                color: AppColors.mutedText,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: !_incident.buzzerActive
+                        ? FilledButton.styleFrom(
+                            backgroundColor: AppColors.goRed)
+                        : null,
+                    onPressed: _isTogglingBuzzer ? null : _toggleBuzzer,
+                    icon: Icon(
+                      _incident.buzzerActive
+                          ? Icons.notifications_off_outlined
+                          : Icons.notifications_active_outlined,
+                    ),
+                    label: Text(
+                      _isTogglingBuzzer
+                          ? 'Sending Command...'
+                          : _incident.buzzerActive
+                              ? 'Deactivate Buzzer'
+                              : 'Activate Buzzer',
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  style: !_incident.buzzerActive
-                      ? FilledButton.styleFrom(backgroundColor: AppColors.goRed)
-                      : null,
-                  onPressed: _isTogglingBuzzer ? null : _toggleBuzzer,
-                  icon: Icon(
-                    _incident.buzzerActive
-                        ? Icons.notifications_off_outlined
-                        : Icons.notifications_active_outlined,
-                  ),
-                  label: Text(
-                    _isTogglingBuzzer
-                        ? 'Sending Command...'
-                        : _incident.buzzerActive
-                            ? 'Deactivate Buzzer'
-                            : 'Activate Buzzer',
-                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           _CollapsibleSectionCard(
             title:
@@ -559,6 +757,38 @@ class _IncidentDetailsScreenState extends State<IncidentDetailsScreen> {
                       ),
                     ))
                 .toList(),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Field Evidence',
+                      style: TextStyle(fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Attach an incident photo for the owning barangay and, when escalated, LT-MDRRMO coordinators.',
+                    style: TextStyle(color: AppColors.mutedText),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _incident.isResponderTerminal ||
+                              _isUploadingAttachment
+                          ? null
+                          : _showAttachmentSource,
+                      icon: const Icon(Icons.add_a_photo_outlined),
+                      label: Text(_isUploadingAttachment
+                          ? 'Uploading...'
+                          : 'Add Private Photo'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 24),
         ],
@@ -616,7 +846,7 @@ class _BackupSection extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 10),
-            if (!active && !incident.isCompleted)
+            if (!active && !incident.isResponderTerminal)
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -642,10 +872,156 @@ class _BackupSection extends StatelessWidget {
   }
 }
 
-class _AssignmentSummaryCard extends StatelessWidget {
-  const _AssignmentSummaryCard({required this.incident});
+class _ResourcesSection extends StatelessWidget {
+  const _ResourcesSection({required this.incident});
 
   final Incident incident;
+
+  @override
+  Widget build(BuildContext context) {
+    final request = incident.backupRequest;
+    final equipmentRequested = request != null &&
+        request.status.isActive &&
+        request.assistanceTypes.contains(BackupAssistanceType.equipmentVehicle);
+    final resources = incident.assignedResources;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.fire_truck_outlined,
+                    color: AppColors.setBlueDark),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    'Vehicles & Equipment',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                ),
+                Text(
+                  '${resources.length} assigned',
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Barangay dispatch assigns local resources. LT-MDRRMO may add municipal resources after escalation. Changes appear here live.',
+              style: TextStyle(color: AppColors.mutedText),
+            ),
+            if (equipmentRequested) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: resources.isEmpty
+                      ? AppColors.warningSoft
+                      : AppColors.successSoft,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  resources.isEmpty
+                      ? 'Equipment or vehicle support requested - awaiting dispatcher assignment.'
+                      : 'Equipment or vehicle support requested - resource assigned.',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+            if (resources.isEmpty) ...[
+              const SizedBox(height: 14),
+              const Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.no_transfer_outlined,
+                        color: AppColors.mutedText),
+                    SizedBox(height: 6),
+                    Text(
+                      'No vehicles or equipment assigned',
+                      style: TextStyle(
+                        color: AppColors.mutedText,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              const Divider(height: 24),
+              ...resources.map((resource) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _AssignedResourceRow(resource: resource),
+                  )),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AssignedResourceRow extends StatelessWidget {
+  const _AssignedResourceRow({required this.resource});
+
+  final ResponseResource resource;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.local_shipping_outlined, color: AppColors.mediumGreen),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${resource.id} - ${resource.unitName}',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              Text(
+                '${resource.type} - ${resource.agency}',
+                style: const TextStyle(color: AppColors.mutedText),
+              ),
+              Text(
+                'Base: ${resource.baseLocation}',
+                style: const TextStyle(
+                  color: AppColors.mutedText,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (resource.notes.isNotEmpty) Text(resource.notes),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Chip(label: Text(resource.status.label)),
+      ],
+    );
+  }
+}
+
+class _AssignmentSummaryCard extends StatelessWidget {
+  const _AssignmentSummaryCard({
+    required this.incident,
+    required this.isAcknowledging,
+    required this.onAcknowledge,
+  });
+
+  final Incident incident;
+  final bool isAcknowledging;
+  final VoidCallback onAcknowledge;
 
   @override
   Widget build(BuildContext context) {
@@ -702,6 +1078,21 @@ class _AssignmentSummaryCard extends StatelessWidget {
                         activeAssignment ? unit : 'No active unit assigned',
                         style: const TextStyle(color: AppColors.mutedText),
                       ),
+                      if (activeAssignment) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Assigned by: ${incident.assignmentSource ?? 'Authorized NodeGuard dispatcher'}',
+                          style: const TextStyle(
+                            color: AppColors.mediumGreen,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (incident.barangayName != null)
+                          Text(
+                            'Owning barangay: ${incident.barangayName}',
+                            style: const TextStyle(color: AppColors.mutedText),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -719,6 +1110,46 @@ class _AssignmentSummaryCard extends StatelessWidget {
               ),
             ],
             const Divider(height: 22),
+            if ((incident.assignmentInstructions ?? '').isNotEmpty) ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.assignment_outlined,
+                      size: 18, color: AppColors.mediumGreen),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      'Instructions: ${incident.assignmentInstructions}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 22),
+            ],
+            if (activeAssignment &&
+                incident.assignmentAcknowledgedAt == null) ...[
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: isAcknowledging ? null : onAcknowledge,
+                  icon: const Icon(Icons.task_alt_outlined),
+                  label: Text(isAcknowledging
+                      ? 'Acknowledging...'
+                      : 'Acknowledge Assignment'),
+                ),
+              ),
+              const Divider(height: 22),
+            ] else if (incident.assignmentAcknowledgedAt != null) ...[
+              Text(
+                'Acknowledged ${formatDateTime(incident.assignmentAcknowledgedAt!)}',
+                style: const TextStyle(
+                  color: AppColors.successGreen,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const Divider(height: 22),
+            ],
             Row(
               children: [
                 const Icon(Icons.place_outlined,

@@ -3,6 +3,7 @@ import { ResponseResource } from "@/types";
 export const resources: ResponseResource[] = [
   {
     id: "AMB-001",
+    organizationType: "LT-MDRRMO",
     type: "Ambulance",
     unitName: "Ambulance 01",
     agency: "MDRRMO",
@@ -14,6 +15,9 @@ export const resources: ResponseResource[] = [
   },
   {
     id: "AMB-002",
+    barangayId: "brgy-pico",
+    barangayName: "Pico",
+    organizationType: "Barangay",
     type: "Ambulance",
     unitName: "Ambulance 02",
     agency: "EMS",
@@ -25,6 +29,7 @@ export const resources: ResponseResource[] = [
   },
   {
     id: "FIRE-001",
+    organizationType: "LT-MDRRMO",
     type: "Fire Truck",
     unitName: "Fire Truck 01",
     agency: "BFP",
@@ -36,6 +41,7 @@ export const resources: ResponseResource[] = [
   },
   {
     id: "FIRE-002",
+    organizationType: "LT-MDRRMO",
     type: "Fire Truck",
     unitName: "Fire Truck 02",
     agency: "BFP",
@@ -47,6 +53,7 @@ export const resources: ResponseResource[] = [
   },
   {
     id: "RESCUE-001",
+    organizationType: "LT-MDRRMO",
     type: "Rescue Vehicle",
     unitName: "Rescue Vehicle 01",
     agency: "MDRRMO",
@@ -58,6 +65,7 @@ export const resources: ResponseResource[] = [
   },
   {
     id: "PATROL-001",
+    organizationType: "LT-MDRRMO",
     type: "Patrol Vehicle",
     unitName: "PNP Patrol 01",
     agency: "PNP",
@@ -69,6 +77,7 @@ export const resources: ResponseResource[] = [
   },
   {
     id: "RADIO-001",
+    organizationType: "LT-MDRRMO",
     type: "Communication Radio",
     unitName: "Portable Radio Set A",
     agency: "MDRRMO",
@@ -80,17 +89,21 @@ export const resources: ResponseResource[] = [
   },
   {
     id: "KIT-001",
+    barangayId: "brgy-pico",
+    barangayName: "Pico",
+    organizationType: "Barangay",
     type: "First Aid Kit",
     unitName: "First Aid Kit 01",
     agency: "EMS",
-    status: "Reserved",
+    status: "Available",
     baseLocation: "School Area",
     assignedIncident: "None",
-    notes: "Reserved for school event standby",
+    notes: "Ready for barangay incident response",
     lastUpdated: "2026-07-06 07:50"
   },
   {
     id: "EQUIP-001",
+    organizationType: "LT-MDRRMO",
     type: "Rescue Equipment",
     unitName: "Extrication Tool Kit",
     agency: "MDRRMO",
@@ -102,6 +115,7 @@ export const resources: ResponseResource[] = [
   },
   {
     id: "WATER-001",
+    organizationType: "LT-MDRRMO",
     type: "Water Rescue Equipment",
     unitName: "Water Rescue Kit",
     agency: "MDRRMO",

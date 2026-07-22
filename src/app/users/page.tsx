@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -27,7 +28,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatusChip } from "@/components/StatusChip";
 import { users as userSeed } from "@/data/users";
 import { authorizedFetch, DashboardRole } from "@/lib/auth";
-import { User, UserRole } from "@/types";
+import { Barangay, User, UserRole } from "@/types";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 
 type UserForm = {
@@ -37,30 +38,42 @@ type UserForm = {
   role: UserRole;
   agencyUnit: string;
   contactNumber: string;
+  barangayId: string;
+  organizationName: string;
 };
 
 const emptyForm: UserForm = {
   email: "",
   password: "",
   fullName: "",
-  role: "Personnel",
+  role: "LT-MDRRMO Operations",
   agencyUnit: "LT-MDRRMO",
   contactNumber: "",
+  barangayId: "",
+  organizationName: "LT-MDRRMO",
 };
 
 function toDbRole(role: UserRole): DashboardRole {
+  if (role === "Barangay Administrator") return "barangay_admin";
+  if (role === "Barangay Personnel") return "barangay_personnel";
+  if (role === "LT-MDRRMO Administrator") return "mdrrmo_admin";
+  if (role === "LT-MDRRMO Operations") return "mdrrmo_operations";
+  if (role === "Field Responder") return "field_responder";
   if (role === "Super Admin") return "super_admin";
   if (role === "Admin") return "admin";
   return "personnel";
 }
 
 export default function UsersPage() {
+  const pathname = usePathname();
+  const barangayEnvironment = pathname.startsWith("/barangay");
   const [users, setUsers] = useState<User[]>(isSupabaseConfigured() ? [] : userSeed);
   const [editing, setEditing] = useState<User | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<UserForm>(emptyForm);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [barangays, setBarangays] = useState<Barangay[]>([]);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -75,12 +88,13 @@ export default function UsersPage() {
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void loadUsers(), 0);
+    void authorizedFetch("/api/barangays").then((response) => response.json()).then((result: { barangays?: Barangay[] }) => setBarangays(result.barangays ?? []));
     return () => window.clearTimeout(initialLoad);
   }, [loadUsers]);
 
   const openCreate = () => {
     setEditing(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, role: barangayEnvironment ? "Barangay Personnel" : "LT-MDRRMO Operations", agencyUnit: barangayEnvironment ? "Barangay Emergency Desk" : "LT-MDRRMO" });
     setDialogOpen(true);
   };
 
@@ -105,6 +119,8 @@ export default function UsersPage() {
               role: toDbRole(form.role),
               agencyUnit: form.agencyUnit,
               contactNumber: form.contactNumber,
+              barangayId: form.barangayId || undefined,
+              organizationName: form.organizationName,
             },
       ),
     });
@@ -150,7 +166,7 @@ export default function UsersPage() {
       <PageHeader
         eyebrow="Role Management"
         title="Users"
-        subtitle="Create authorized accounts, assign least-privilege roles, and disable access when responsibilities change."
+        subtitle={barangayEnvironment ? "Manage authorized local personnel and field responders for your barangay." : "Manage system-wide users, participating barangays, roles, and access status."}
         actions={<Button startIcon={<PersonAddIcon />} onClick={openCreate}>Add User</Button>}
       />
       <Card>
@@ -169,6 +185,7 @@ export default function UsersPage() {
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Role</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 800 }}>{user.role}</Typography>
+                    <Typography variant="caption" color="text.secondary">{user.organizationName ?? "Organization not assigned"}</Typography>
                   </Box>
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Last Active</Typography>
@@ -191,6 +208,7 @@ export default function UsersPage() {
                   <TableCell>Name</TableCell>
                   <TableCell>Email</TableCell>
                   <TableCell>Role</TableCell>
+                  <TableCell>Organization</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Last Active</TableCell>
                   <TableCell align="right">Actions</TableCell>
@@ -202,6 +220,7 @@ export default function UsersPage() {
                     <TableCell sx={{ fontWeight: 800 }}>{user.name}</TableCell>
                     <TableCell>{user.email}</TableCell>
                     <TableCell>{user.role}</TableCell>
+                    <TableCell>{user.organizationName ?? "Not assigned"}</TableCell>
                     <TableCell><StatusChip status={user.status} /></TableCell>
                     <TableCell>{user.lastActive}</TableCell>
                     <TableCell align="right">
@@ -229,12 +248,48 @@ export default function UsersPage() {
             {!editing && (
               <TextField label="Temporary Password" type="password" value={form.password} required helperText="Use at least 8 characters and share it through an approved channel." onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
             )}
-            <TextField select label="Role" value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value as UserRole }))}>
-              {(["Personnel", "Admin", "Super Admin"] as UserRole[]).map((role) => <MenuItem key={role} value={role}>{role}</MenuItem>)}
+            <TextField select label="Role" value={form.role} onChange={(event) => {
+              const role = event.target.value as UserRole;
+              setForm((current) => ({
+                ...current,
+                role,
+                barangayId: role.startsWith("LT-MDRRMO") ? "" : current.barangayId,
+                organizationName: role.startsWith("LT-MDRRMO") ? "LT-MDRRMO" : current.organizationName,
+              }));
+            }}>
+              {(barangayEnvironment
+                ? (["Barangay Personnel", "Field Responder"] as UserRole[])
+                : (["Barangay Administrator", "Barangay Personnel", "LT-MDRRMO Administrator", "LT-MDRRMO Operations", "Field Responder"] as UserRole[])
+              ).map((role) => <MenuItem key={role} value={role}>{role}</MenuItem>)}
             </TextField>
             {!editing && (
               <>
                 <TextField label="Agency / Unit" value={form.agencyUnit} required onChange={(event) => setForm((current) => ({ ...current, agencyUnit: event.target.value }))} />
+                {!barangayEnvironment && ["Barangay Administrator", "Barangay Personnel"].includes(form.role) && (
+                  <TextField select label="Assigned Barangay" value={form.barangayId} required onChange={(event) => { const selected = barangays.find((item) => item.id === event.target.value); setForm((current) => ({ ...current, barangayId: event.target.value, organizationName: selected ? `Barangay ${selected.name}` : "" })); }}>
+                    {barangays.map((item) => <MenuItem key={item.id} value={item.id}>Barangay {item.name}</MenuItem>)}
+                  </TextField>
+                )}
+                {!barangayEnvironment && form.role === "Field Responder" && (
+                  <TextField
+                    select
+                    label="Responder owner"
+                    value={form.barangayId || "mdrrmo"}
+                    required
+                    onChange={(event) => {
+                      const barangayId = event.target.value === "mdrrmo" ? "" : event.target.value;
+                      const selected = barangays.find((item) => item.id === barangayId);
+                      setForm((current) => ({
+                        ...current,
+                        barangayId,
+                        organizationName: selected ? `Barangay ${selected.name}` : "LT-MDRRMO",
+                      }));
+                    }}
+                  >
+                    <MenuItem value="mdrrmo">LT-MDRRMO</MenuItem>
+                    {barangays.map((item) => <MenuItem key={item.id} value={item.id}>Barangay {item.name}</MenuItem>)}
+                  </TextField>
+                )}
                 <TextField label="Contact Number" value={form.contactNumber} onChange={(event) => setForm((current) => ({ ...current, contactNumber: event.target.value }))} />
               </>
             )}

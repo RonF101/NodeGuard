@@ -16,7 +16,7 @@ class NotificationsScreen extends StatelessWidget {
       body: ListView(
         padding: AppLayout.pagePadding(context),
         children: [
-          Text('MDRRMO Dashboard Updates',
+          Text('Barangay and LT-MDRRMO Updates',
               style: Theme.of(context)
                   .textTheme
                   .titleLarge

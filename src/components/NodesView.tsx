@@ -76,7 +76,9 @@ export function NodesView() {
 
   const alertCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    incidents.forEach((incident) => counts.set(incident.deviceId, (counts.get(incident.deviceId) ?? 0) + 1));
+    incidents.forEach((incident) => {
+      if (incident.deviceId) counts.set(incident.deviceId, (counts.get(incident.deviceId) ?? 0) + 1);
+    });
     return counts;
   }, [incidents]);
 

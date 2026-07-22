@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { assignResourceToIncident } from "@/lib/nodeguardRepository";
-import { AuthorizationError, requireRequestActor } from "@/lib/auth";
+import { AuthorizationError, requireRequestActor, requireResourcePermission } from "@/lib/auth";
 
 export async function POST(request: Request) {
   try {
-    const actor = await requireRequestActor(request, ["personnel", "admin", "super_admin"]);
+    const actor = await requireRequestActor(request, ["barangay_admin", "barangay_personnel", "mdrrmo_admin", "mdrrmo_operations", "admin", "super_admin"]);
     const body = (await request.json()) as {
       resourceId?: string;
       incidentId?: string;
@@ -15,11 +15,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    await requireResourcePermission(actor, body.resourceId, body.incidentId);
 
     const result = await assignResourceToIncident(
       body.resourceId,
       body.incidentId,
-      actor.demo ? undefined : actor.id,
+      actor.id,
+      actor.name,
     );
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   } catch (error) {

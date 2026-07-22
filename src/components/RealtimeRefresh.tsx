@@ -16,6 +16,8 @@ const realtimeTables = [
   "incident_activity_events",
   "backup_requests",
   "backup_offers",
+  "response_resources",
+  "resource_assignments",
   "notifications",
   "device_locations",
 ];

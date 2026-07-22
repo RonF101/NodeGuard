@@ -5,6 +5,7 @@ import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
 import SecurityIcon from "@mui/icons-material/Security";
 import SettingsInputAntennaIcon from "@mui/icons-material/SettingsInputAntenna";
 import WarningIcon from "@mui/icons-material/Warning";
+import AccessTimeOutlinedIcon from "@mui/icons-material/AccessTimeOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
@@ -20,6 +21,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
+import { OperatingHoursPanel } from "@/components/OperatingHoursPanel";
 import { StatusChip } from "@/components/StatusChip";
 import { authorizedFetch } from "@/lib/auth";
 import { fetchDeviceNodes } from "@/lib/nodeguardRepository";
@@ -30,6 +32,7 @@ const settingGroups = [
   { label: "Device Management", icon: <SettingsInputAntennaIcon /> },
   { label: "Integrations", icon: <NotificationsActiveIcon /> },
   { label: "Security", icon: <SecurityIcon /> },
+  { label: "Operating Hours", icon: <AccessTimeOutlinedIcon /> },
 ];
 
 type SystemHealth = {
@@ -194,6 +197,7 @@ export default function SettingsPage() {
                 ].map((item) => <Alert key={item} severity="success">{item}</Alert>)}
               </Stack>
             )}
+            {tab === 4 && <OperatingHoursPanel environment="mdrrmo" />}
           </Box>
         </CardContent>
       </Card>

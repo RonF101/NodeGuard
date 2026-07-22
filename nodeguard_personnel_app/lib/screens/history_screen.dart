@@ -26,7 +26,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final today = DateTime.now();
     final completed =
         sortIncidentsByAlertLevel(widget.incidents.where((incident) {
-      if (!incident.isCompleted) {
+      if (!incident.isResponderTerminal) {
         return false;
       }
       if (_dateFilter == 'Today') {

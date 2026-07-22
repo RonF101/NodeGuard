@@ -10,6 +10,7 @@ const _demoStatuses = <IncidentStatus>[
   IncidentStatus.enRoute,
   IncidentStatus.onScene,
   IncidentStatus.responding,
+  IncidentStatus.unableToRespond,
   IncidentStatus.resolved,
   IncidentStatus.closed,
   IncidentStatus.needBackup,

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/mock_incidents.dart';
@@ -6,6 +8,7 @@ import '../models/incident.dart';
 import '../models/alert_level.dart';
 import '../models/backup_request.dart';
 import '../models/responder.dart';
+import '../models/response_resource.dart';
 import 'supabase_service.dart';
 
 class NodeGuardDataException implements Exception {
@@ -43,7 +46,12 @@ bool isCurrentResponderAssignment(
   String responderName,
 ) {
   if (row['assigned_responder_name'] == responderName) return true;
-  if (const {'resolved', 'closed', 'false_alert'}.contains(row['status'])) {
+  if (const {
+    'resolved',
+    'closed',
+    'false_alert',
+    'unable_to_respond',
+  }.contains(row['status'])) {
     return false;
   }
 
@@ -196,6 +204,67 @@ class NodeGuardRepository {
       return const IncidentStatusUpdateResult.retryLater(
         'The update could not reach NodeGuard. It will retry when the connection is stable.',
       );
+    }
+  }
+
+  Future<void> acknowledgeAssignment(String publicId) async {
+    final client = SupabaseService.client;
+    if (client == null) return;
+    try {
+      await client.rpc('acknowledge_nodeguard_assignment', params: {
+        'p_incident_public_id': publicId,
+      });
+    } on PostgrestException catch (error) {
+      throw NodeGuardDataException(error.message);
+    }
+  }
+
+  Future<void> uploadFieldAttachment({
+    required String publicId,
+    required Uint8List bytes,
+    required String fileName,
+    required String contentType,
+  }) async {
+    final client = SupabaseService.client;
+    if (client == null) return;
+    if (bytes.isEmpty || bytes.length > 10 * 1024 * 1024) {
+      throw const NodeGuardDataException(
+        'Field attachments must be non-empty and no larger than 10 MB.',
+      );
+    }
+    String? storagePath;
+    try {
+      final incident = await client
+          .from('incidents')
+          .select('id')
+          .eq('public_id', publicId)
+          .single();
+      final safeName = fileName
+          .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '-')
+          .replaceAll(RegExp(r'-+'), '-');
+      storagePath = '$publicId/field/'
+          '${DateTime.now().microsecondsSinceEpoch}-$safeName';
+      await client.storage.from('incident-media').uploadBinary(
+            storagePath,
+            bytes,
+            fileOptions: FileOptions(
+              contentType: contentType,
+              upsert: false,
+            ),
+          );
+      await client.from('incident_attachments').insert({
+        'incident_id': incident['id'],
+        'storage_path': storagePath,
+        'media_type': 'field_attachment',
+        'uploaded_by': client.auth.currentUser?.id,
+      });
+    } on StorageException catch (error) {
+      throw NodeGuardDataException(error.message);
+    } on PostgrestException catch (error) {
+      if (storagePath != null) {
+        await client.storage.from('incident-media').remove([storagePath]);
+      }
+      throw NodeGuardDataException(error.message);
     }
   }
 
@@ -364,6 +433,7 @@ class NodeGuardRepository {
     final device = _deviceLocationFromRow(row);
     final voice = _voiceContextFromRow(row);
     String? voiceUrl;
+    String? cameraCaptureUrl;
     final storagePath = voice?['storage_path'];
     if (storagePath is String && storagePath.isNotEmpty) {
       try {
@@ -374,16 +444,32 @@ class NodeGuardRepository {
         voiceUrl = null;
       }
     }
+    final cameraPath = row['camera_capture_path'];
+    if (cameraPath is String && cameraPath.isNotEmpty) {
+      try {
+        cameraCaptureUrl = await client.storage
+            .from('incident-media')
+            .createSignedUrl(cameraPath, 900);
+      } on StorageException {
+        cameraCaptureUrl = null;
+      }
+    }
+    final barangayValue = row['barangays'];
+    final barangay = barangayValue is Map
+        ? barangayValue
+        : barangayValue is List && barangayValue.isNotEmpty
+            ? barangayValue.first
+            : null;
     return Incident(
       id: row['public_id'] as String? ?? 'NG-UNKNOWN',
       category: _categoryFromDb(row['category'] as String?),
       locationName: row['location_name'] as String? ?? 'Unknown location',
       approximateAddress:
           row['approximate_address'] as String? ?? 'Address unavailable',
-      deviceId: row['device_id'] as String? ?? 'UNKNOWN-NODE',
-      nodeLocation:
-          row['node_location'] as String? ?? 'Node location unavailable',
-      timestamp: DateTime.tryParse(row['occurred_at'] as String? ?? '') ??
+      deviceId: row['device_id'] as String?,
+      nodeLocation: row['node_location'] as String?,
+      timestamp: DateTime.tryParse(row['reported_at'] as String? ?? '') ??
+          DateTime.tryParse(row['occurred_at'] as String? ?? '') ??
           DateTime.now(),
       alertLevel: alertLevelFromDatabase(row['priority'] as String?),
       alertLevelUpdatedAt:
@@ -401,8 +487,10 @@ class NodeGuardRepository {
       assignedResponder:
           row['assigned_responder_name'] as String? ?? 'Unassigned responder',
       assignedResponders: _assignedResponderNames(row),
-      description:
-          row['caller_context'] as String? ?? 'No field context available.',
+      assignedResources: _assignedResourcesFromRow(row),
+      description: row['incident_description'] as String? ??
+          row['caller_context'] as String? ??
+          'No field context available.',
       coordinates: row['coordinates'] as String? ?? 'Coordinates unavailable',
       notes: notes.isEmpty
           ? [
@@ -419,7 +507,51 @@ class NodeGuardRepository {
         ..._activityEventsFromRow(row),
       ],
       backupRequest: _backupRequestFromRow(row),
+      barangayName: barangay is Map ? barangay['name'] as String? : null,
+      assignmentSource: (row['assignment_source'] as String?)
+                  ?.toLowerCase()
+                  .contains('mdrrmo') ==
+              true
+          ? 'LT-MDRRMO'
+          : row['assignment_source'] != null
+              ? 'Barangay'
+              : null,
+      assignmentInstructions: row['assignment_instructions'] as String?,
+      assignmentAcknowledgedAt: DateTime.tryParse(
+        row['assignment_acknowledged_at'] as String? ?? '',
+      ),
+      cameraCaptureUrl: cameraCaptureUrl,
+      sourceType: const {'iot_node', 'node_alert'}.contains(row['source_type'])
+          ? 'IoT Node'
+          : 'Manual Entry',
+      reportingChannel:
+          _reportingChannelLabel(row['reporting_channel'] as String?),
+      reportingPersonOrSource: row['reporting_person_source'] as String?,
+      reportingOffice: row['reporting_office'] as String?,
+      incidentSubtype: row['incident_subtype'] as String?,
+      landmark: row['nearby_landmark'] as String?,
+      personsAffected: row['persons_affected'] as int?,
+      affectedPersonsCondition: row['affected_persons_condition'] as String?,
     );
+  }
+
+  String _reportingChannelLabel(String? value) {
+    const values = {
+      'emergency_hotline': 'Emergency Hotline',
+      'mobile_call': 'Mobile Call',
+      'sms': 'SMS / Text Message',
+      'social_media': 'Social Media Message',
+      'email': 'Email',
+      'walk_in': 'Walk-in Report',
+      'radio': 'Radio',
+      'barangay_personnel': 'Barangay Personnel',
+      'mdrrmo_personnel': 'LT-MDRRMO Personnel',
+      'field_responder': 'Field Responder',
+      'partner_office': 'Partner Office / Organization',
+      'iot_node': 'IoT Alert Node',
+      'other': 'Other',
+    };
+    return values[value] ?? 'Not recorded';
   }
 
   Map<String, dynamic>? _voiceContextFromRow(Map<String, dynamic> row) {
@@ -503,6 +635,53 @@ class NodeGuardRepository {
       }
     }
     return names.toList();
+  }
+
+  List<ResponseResource> _assignedResourcesFromRow(Map<String, dynamic> row) {
+    final assignments = row['resource_assignments'];
+    if (assignments is! List) return const [];
+
+    final resources = <ResponseResource>[];
+    for (final assignment in assignments.whereType<Map>()) {
+      if (assignment['released_at'] != null) continue;
+      final value = assignment['response_resources'];
+      final resource = value is Map
+          ? value
+          : value is List && value.isNotEmpty && value.first is Map
+              ? value.first as Map
+              : null;
+      if (resource == null) continue;
+      resources.add(
+        ResponseResource(
+          id: resource['public_code'] as String? ?? 'RESOURCE',
+          type: resource['resource_type'] as String? ?? 'Response resource',
+          unitName: resource['unit_name'] as String? ?? 'Unnamed resource',
+          agency: resource['agency'] as String? ?? 'Unknown agency',
+          status: _resourceAvailabilityFromDb(resource['status'] as String?),
+          baseLocation:
+              resource['base_location'] as String? ?? 'Base not recorded',
+          notes: resource['notes'] as String? ?? '',
+          availabilityNote: resource['availability_note'] as String?,
+        ),
+      );
+    }
+    resources.sort((first, second) => first.id.compareTo(second.id));
+    return resources;
+  }
+
+  ResourceAvailability _resourceAvailabilityFromDb(String? value) {
+    switch (value) {
+      case 'dispatched':
+        return ResourceAvailability.dispatched;
+      case 'under_maintenance':
+        return ResourceAvailability.underMaintenance;
+      case 'unavailable':
+        return ResourceAvailability.unavailable;
+      case 'reserved':
+        return ResourceAvailability.reserved;
+      default:
+        return ResourceAvailability.available;
+    }
   }
 
   String? _latestPriorityActor(Map<String, dynamic> row) {
@@ -679,7 +858,14 @@ class NodeGuardRepository {
       case 'new_alert':
         return IncidentStatus.newAlert;
       case 'assigned':
+      case 'validated':
+      case 'dispatched':
+      case 'escalated':
         return IncidentStatus.assigned;
+      case 'coordinated_by_mdrrmo':
+        return IncidentStatus.enRoute;
+      case 'unable_to_respond':
+        return IncidentStatus.unableToRespond;
       case 'en_route':
         return IncidentStatus.enRoute;
       case 'on_scene':
@@ -711,6 +897,8 @@ class NodeGuardRepository {
         return 'on_scene';
       case IncidentStatus.responding:
         return 'responding';
+      case IncidentStatus.unableToRespond:
+        return 'unable_to_respond';
       case IncidentStatus.resolved:
         return 'resolved';
       case IncidentStatus.closed:
@@ -764,12 +952,23 @@ class NodeGuardRepository {
 
 const _incidentSelectColumns = '''
 public_id,
+source_type,
+reporting_channel,
+reporting_person_source,
+reporting_office,
+incident_subtype,
+nearby_landmark,
+persons_affected,
+affected_persons_condition,
+barangay_id,
+barangays(name),
 category,
 location_name,
 approximate_address,
 device_id,
 node_location,
 occurred_at,
+reported_at,
 priority,
 priority_updated_at,
 priority_updated_by,
@@ -780,12 +979,18 @@ voice_context_available,
 voice_duration,
 assigned_unit,
 assigned_responder_name,
+assignment_source,
+assignment_instructions,
+assignment_acknowledged_at,
+incident_description,
+camera_capture_path,
 caller_context,
 coordinates,
 incident_status_updates(remarks, status, created_at),
 incident_priority_updates(id, previous_priority, new_priority, actor_name, actor_role, source, reason, created_at),
 incident_activity_events(id, event_type, message, actor_name, actor_role, source, reason, created_at),
 incident_assignments(responder_id, responders(name, profile_id)),
+resource_assignments(id, assigned_at, released_at, response_resources(public_code, resource_type, unit_name, agency, status, base_location, notes, availability_note)),
 backup_requests(id, status, requested_at, requested_by, requesting_team, assistance_types, responders_needed, reason, urgency, fulfilled_at, cancelled_at, cancellation_reason, backup_offers(id, responder_id, status, offered_at, decided_at, decision_note, responders(name, availability))),
 device_locations(buzzer_active, buzzer_updated_at),
 voice_contexts(storage_path, transcript, duration_seconds)

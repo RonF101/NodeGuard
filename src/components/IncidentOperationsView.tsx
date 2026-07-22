@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Alert from "@mui/material/Alert";
 import Stack from "@mui/material/Stack";
 import { AppShell } from "@/components/AppShell";
 import { IncidentModal } from "@/components/IncidentModal";
 import { IncidentTable } from "@/components/IncidentTable";
+import { ErrorState, LoadingSkeleton } from "@/components/OperationalFeedback";
 import { PageHeader } from "@/components/PageHeader";
 import { NODEGUARD_REALTIME_EVENT } from "@/components/RealtimeRefresh";
 import {
@@ -16,17 +16,32 @@ import {
 } from "@/config/incidentOperations";
 import { incidents as incidentSeed } from "@/data/incidents";
 import { responders as responderSeed } from "@/data/responders";
-import { fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
+import { resources as resourceSeed } from "@/data/resources";
+import { fetchIncidents, fetchResponders, fetchResources } from "@/lib/nodeguardRepository";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
-import type { Incident, IncidentStatus, Responder } from "@/types";
+import type { Incident, IncidentStatus, Responder, ResponseResource } from "@/types";
 
 type IncidentOperationsViewProps = {
   mode: "live" | "registry";
+  environment?: "barangay" | "mdrrmo" | "legacy";
+  scope?: "incoming" | "active" | "dispatch" | "escalated" | "records";
+  title?: string;
+  eyebrow?: string;
+  subtitle?: string;
 };
 
-export function IncidentOperationsView({ mode }: IncidentOperationsViewProps) {
+export function IncidentOperationsView({
+  mode,
+  environment = "legacy",
+  scope,
+  title,
+  eyebrow,
+  subtitle,
+}: IncidentOperationsViewProps) {
   const searchParams = useSearchParams();
   const requestedStatus = searchParams.get("status");
+  const requestedIncident = searchParams.get("incident");
+  const initialSearch = searchParams.get("barangay") ?? searchParams.get("search") ?? "";
   const initialStatus = incidentStatusOrder.includes(requestedStatus as IncidentStatus)
     ? (requestedStatus as IncidentStatus)
     : "All";
@@ -34,16 +49,20 @@ export function IncidentOperationsView({ mode }: IncidentOperationsViewProps) {
   const [selected, setSelected] = useState<Incident | null>(null);
   const [items, setItems] = useState<Incident[]>(isSupabaseConfigured() ? [] : incidentSeed);
   const [responders, setResponders] = useState<Responder[]>(isSupabaseConfigured() ? [] : responderSeed);
+  const [resources, setResources] = useState<ResponseResource[]>(isSupabaseConfigured() ? [] : resourceSeed);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const loadIncidents = useCallback(async () => {
     try {
-      const [nextIncidents, nextResponders] = await Promise.all([
+      const [nextIncidents, nextResponders, nextResources] = await Promise.all([
         fetchIncidents(),
         fetchResponders(),
+        fetchResources(),
       ]);
       setItems(nextIncidents);
       setResponders(nextResponders);
+      setResources(nextResources);
       setSelected((current) =>
         current
           ? nextIncidents.find((incident) => incident.id === current.id) ?? current
@@ -52,6 +71,8 @@ export function IncidentOperationsView({ mode }: IncidentOperationsViewProps) {
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load incident operations.");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -65,14 +86,38 @@ export function IncidentOperationsView({ mode }: IncidentOperationsViewProps) {
   }, [loadIncidents]);
 
   const visibleItems = useMemo(() => {
+    const scoped = environment === "barangay" && !isSupabaseConfigured()
+      ? items.filter((incident) => incident.barangayId === "brgy-pico")
+      : items;
+    if (scope === "incoming") {
+      return scoped.filter((incident) => incident.sourceType === "IoT Node" && ["Reported", "Pending Validation", "Pending Verification"].includes(incident.status));
+    }
+    if (scope === "active") {
+      return scoped.filter((incident) => !isFinalIncident(incident.status));
+    }
+    if (scope === "dispatch") {
+      return scoped.filter((incident) => ["Validated", "Verified", "Assigned", "Dispatched", "Responding", "On Scene", "Escalated", "Coordinated by LT-MDRRMO"].includes(incident.status));
+    }
+    if (scope === "escalated") {
+      return scoped.filter((incident) => incident.escalationStatus && incident.escalationStatus !== "Not Escalated");
+    }
     if (activeScope) {
-      return items.filter((incident) => activeResponseStatuses.includes(incident.status));
+      return scoped.filter((incident) => activeResponseStatuses.includes(incident.status));
     }
     if (mode === "live") {
-      return items.filter((incident) => !isFinalIncident(incident.status));
+      return scoped.filter((incident) => !isFinalIncident(incident.status));
     }
-    return items;
-  }, [activeScope, items, mode]);
+    return scoped;
+  }, [activeScope, environment, items, mode, scope]);
+
+  useEffect(() => {
+    if (!requestedIncident) return;
+    const timer = window.setTimeout(() => {
+      const requested = visibleItems.find((incident) => incident.id === requestedIncident);
+      if (requested) setSelected(requested);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [requestedIncident, visibleItems]);
 
   const handleIncidentUpdated = useCallback((updatedIncident: Incident) => {
     setItems((current) =>
@@ -86,32 +131,36 @@ export function IncidentOperationsView({ mode }: IncidentOperationsViewProps) {
   return (
     <AppShell>
       <PageHeader
-        eyebrow={mode === "live" ? "NodeGuard Device Intake" : "Operations Record"}
-        title={mode === "live" ? "Live Alerts" : "Incidents"}
+        eyebrow={eyebrow ?? (mode === "live" ? "Incident Operations" : "Operations Record")}
+        title={title ?? (mode === "live" ? "Live Alerts" : "Incidents")}
         subtitle={
-          mode === "live"
-            ? "Verify incoming alerts, dispatch teams, and monitor active field response."
-            : "Search and review the complete NodeGuard incident record."
+          subtitle ?? (mode === "live"
+            ? "Validate reports from every intake channel, dispatch teams, and monitor active field response."
+            : "Search and review the complete NodeGuard incident record.")
         }
       />
-      {loadError && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}
-      <Stack spacing={2}>
+      {loadError && <ErrorState message={loadError} onRetry={() => { setLoading(true); void loadIncidents(); }} />}
+      {loading ? <LoadingSkeleton rows={6} /> : <Stack spacing={2}>
         <IncidentTable
-          key={`${mode}:${initialStatus}:${activeScope}`}
+          key={`${mode}:${initialStatus}:${activeScope}:${initialSearch}`}
           incidents={visibleItems}
           onView={setSelected}
           showVoice
           initialStatus={initialStatus}
+          initialSearch={initialSearch}
         />
-      </Stack>
+      </Stack>}
       <IncidentModal
         key={selected?.id ?? `${mode}-incident-modal`}
         incident={selected}
         open={Boolean(selected)}
         responders={responders}
+        resources={resources}
         onClose={() => setSelected(null)}
         onIncidentUpdated={handleIncidentUpdated}
         onRespondersUpdated={setResponders}
+        onResourcesUpdated={setResources}
+        environment={environment}
       />
     </AppShell>
   );

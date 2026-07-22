@@ -21,6 +21,10 @@ import { ResponderTable } from "@/components/responders/ResponderTable";
 import { ResourceAssignmentDialog, AssignmentTarget } from "@/components/responders/ResourceAssignmentDialog";
 import { ResourceTable } from "@/components/responders/ResourceTable";
 import {
+  ResourceStatusAction,
+  ResourceStatusDialog,
+} from "@/components/responders/ResourceStatusDialog";
+import {
   ResponderFilters,
   RespondersResourcesFilters
 } from "@/components/responders/RespondersResourcesFilters";
@@ -33,7 +37,7 @@ import {
 import { responders as responderSeed } from "@/data/responders";
 import { resources as resourceSeed } from "@/data/resources";
 import { mdrrmoPalette } from "@/theme/theme";
-import { Responder, ResponseResource } from "@/types";
+import { Responder, ResourceStatus, ResponseResource } from "@/types";
 import { authorizedFetch } from "@/lib/auth";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 
@@ -54,6 +58,8 @@ export default function RespondersPage() {
   const [snackbarMessage, setSnackbarMessage] = useState("Assignment updated successfully.");
   const [incidentItems, setIncidentItems] = useState(isSupabaseConfigured() ? [] : incidents);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [resourceStatusAction, setResourceStatusAction] = useState<ResourceStatusAction | null>(null);
+  const [resourceStatusError, setResourceStatusError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -183,6 +189,10 @@ export default function RespondersPage() {
       );
     } else {
       if (!selectedIncident) return;
+      const selectedResource = resources.find(
+        (resource) => resource.id === assignmentTarget.id,
+      );
+      if (!selectedResource) return;
       setIsAssigning(true);
       const response = await authorizedFetch("/api/assign-resource", {
         method: "POST",
@@ -211,11 +221,105 @@ export default function RespondersPage() {
             : resource
         )
       );
+      setIncidentItems((current) =>
+        current.map((incident) =>
+          incident.id === selectedIncident
+            ? {
+                ...incident,
+                assignedResources: [
+                  ...(incident.assignedResources ?? []).filter(
+                    (resource) => resource.id !== assignmentTarget.id,
+                  ),
+                  {
+                    ...selectedResource,
+                    status: "Dispatched" as const,
+                    assignedIncident: selectedIncident,
+                    availabilityNote: `Assigned to ${selectedIncident}.`,
+                    lastUpdated: new Date().toISOString(),
+                  },
+                ],
+              }
+            : incident,
+        ),
+      );
     }
 
     setAssignmentTarget(null);
     setSnackbarMessage("Assignment updated successfully.");
     setSnackbarOpen(true);
+  };
+
+  const handleResourceStatus = async (
+    status: Exclude<ResourceStatus, "Dispatched">,
+    reason: string,
+  ) => {
+    if (!resourceStatusAction) return;
+    setIsAssigning(true);
+    setResourceStatusError(null);
+    const isRelease = resourceStatusAction.mode === "release";
+    try {
+      const response = await authorizedFetch(
+        isRelease ? "/api/release-resource" : "/api/update-resource-status",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            isRelease
+              ? {
+                  resourceId: resourceStatusAction.resource.id,
+                  nextStatus: status,
+                  reason,
+                }
+              : {
+                  resourceId: resourceStatusAction.resource.id,
+                  status,
+                  reason,
+                },
+          ),
+        },
+      );
+      const result = (await response.json()) as { ok: boolean; reason?: string };
+      if (!result.ok) {
+        setResourceStatusError(result.reason ?? "Resource availability update failed.");
+        return;
+      }
+
+      const resourceId = resourceStatusAction.resource.id;
+      setResources((current) =>
+        current.map((resource) =>
+          resource.id === resourceId
+            ? {
+                ...resource,
+                status,
+                assignedIncident: isRelease ? "None" : resource.assignedIncident,
+                availabilityNote: reason,
+                lastUpdated: new Date().toISOString(),
+              }
+            : resource,
+        ),
+      );
+      if (isRelease) {
+        setIncidentItems((current) =>
+          current.map((incident) => ({
+            ...incident,
+            assignedResources: incident.assignedResources?.filter(
+              (resource) => resource.id !== resourceId,
+            ),
+          })),
+        );
+      }
+      setResourceStatusAction(null);
+      setSnackbarMessage(
+        isRelease
+          ? `Resource released and marked ${status.toLowerCase()}.`
+          : `Resource availability changed to ${status.toLowerCase()}.`,
+      );
+      setSnackbarOpen(true);
+    } catch {
+      setResourceStatusError("The resource availability service could not be reached.");
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
   return (
@@ -309,6 +413,14 @@ export default function RespondersPage() {
                   name: `${resource.id} - ${resource.unitName}`
                 })
               }
+              onRelease={(resource) => {
+                setResourceStatusError(null);
+                setResourceStatusAction({ mode: "release", resource });
+              }}
+              onUpdateStatus={(resource) => {
+                setResourceStatusError(null);
+                setResourceStatusAction({ mode: "availability", resource });
+              }}
             />
           </CardContent>
         </Card>
@@ -323,6 +435,14 @@ export default function RespondersPage() {
         onClose={() => setAssignmentTarget(null)}
         onConfirm={handleConfirmAssignment}
         isConfirming={isAssigning}
+      />
+      <ResourceStatusDialog
+        key={resourceStatusAction ? `${resourceStatusAction.mode}:${resourceStatusAction.resource.id}` : "resource-status-closed"}
+        action={resourceStatusAction}
+        busy={isAssigning}
+        error={resourceStatusError}
+        onClose={() => setResourceStatusAction(null)}
+        onConfirm={handleResourceStatus}
       />
       <Snackbar
         open={snackbarOpen}

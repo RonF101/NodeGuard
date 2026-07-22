@@ -11,8 +11,8 @@ void main() {
     await tester.pumpWidget(const NodeGuardPersonnelApp());
 
     expect(find.text('NodeGuard Personnel'), findsOneWidget);
-    expect(find.text('La Trinidad MDRRMO Emergency Response Application'),
-        findsOneWidget);
+    expect(
+        find.text('NodeGuard Assigned Responder Application'), findsOneWidget);
   });
 
   testWidgets('Login screen appears after splash delay',

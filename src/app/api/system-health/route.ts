@@ -5,7 +5,7 @@ import { getSupabaseClient } from "@/lib/supabaseClient";
 
 export async function GET(request: Request) {
   try {
-    const actor = await requireRequestActor(request, ["personnel", "admin", "super_admin"]);
+    const actor = await requireRequestActor(request, ["mdrrmo_admin", "mdrrmo_operations", "admin", "super_admin"]);
     const supabase = getSupabaseClient();
     const [databaseProbe, bucketProbe] = supabase
       ? await Promise.all([

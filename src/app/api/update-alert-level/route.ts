@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { AuthorizationError, requireRequestActor } from "@/lib/auth";
+import { AuthorizationError, requireIncidentPermission, requireRequestActor } from "@/lib/auth";
 import { updateIncidentAlertLevel } from "@/lib/nodeguardRepository";
 import type { AlertLevel } from "@/types";
 
@@ -17,6 +17,10 @@ export async function POST(request: Request) {
       "personnel",
       "admin",
       "super_admin",
+      "barangay_admin",
+      "barangay_personnel",
+      "mdrrmo_admin",
+      "mdrrmo_operations",
     ]);
     const body = (await request.json()) as {
       incidentId?: string;
@@ -34,13 +38,15 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    await requireIncidentPermission(actor, body.incidentId, "coordinate");
 
     const result = await updateIncidentAlertLevel(
       body.incidentId,
       body.alertLevel,
       "dashboard",
       body.reason,
-      actor.demo ? undefined : actor.id,
+      actor.id,
+      actor.name,
     );
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   } catch (error) {

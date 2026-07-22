@@ -15,12 +15,13 @@ import { AppShell } from "@/components/AppShell";
 import { DashboardIncidentPanel } from "@/components/DashboardIncidentPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
-import { fetchDeviceNodes, fetchIncidents, fetchResponders } from "@/lib/nodeguardRepository";
+import { fetchDeviceNodes, fetchIncidents, fetchResponders, fetchResources } from "@/lib/nodeguardRepository";
 import { mdrrmoPalette } from "@/theme/theme";
 import { incidents as incidentSeed } from "@/data/incidents";
 import { responders as responderSeed } from "@/data/responders";
 import { deviceNodes as deviceSeed } from "@/data/devices";
-import { DeviceNode, Incident, Responder } from "@/types";
+import { resources as resourceSeed } from "@/data/resources";
+import { DeviceNode, Incident, Responder, ResponseResource } from "@/types";
 import { NODEGUARD_REALTIME_EVENT } from "@/components/RealtimeRefresh";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { getOperationalMetrics, incidentStatusConfig, isFinalIncident, sortIncidentQueue } from "@/config/incidentOperations";
@@ -39,18 +40,23 @@ export default function DashboardPage() {
   const [devices, setDevices] = useState<DeviceNode[]>(
     isSupabaseConfigured() ? [] : deviceSeed,
   );
+  const [resources, setResources] = useState<ResponseResource[]>(
+    isSupabaseConfigured() ? [] : resourceSeed,
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadOperations = useCallback(async () => {
     try {
-      const [nextIncidents, nextResponders, nextDevices] = await Promise.all([
+      const [nextIncidents, nextResponders, nextDevices, nextResources] = await Promise.all([
         fetchIncidents(),
         fetchResponders(),
         fetchDeviceNodes(),
+        fetchResources(),
       ]);
       setIncidents(nextIncidents);
       setResponders(nextResponders);
       setDevices(nextDevices);
+      setResources(nextResources);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load operations data.");
@@ -144,6 +150,7 @@ export default function DashboardPage() {
           <DashboardIncidentPanel
             incidents={incidentQueue}
             responders={responders}
+            resources={resources}
             onIncidentUpdated={(updatedIncident) =>
               setIncidents((current) =>
                 current.map((incident) =>
@@ -152,6 +159,7 @@ export default function DashboardPage() {
               )
             }
             onRespondersUpdated={setResponders}
+            onResourcesUpdated={setResources}
           />
         </CardContent>
       </Card>
